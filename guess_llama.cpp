@@ -299,6 +299,45 @@ int main() {
         for (const auto& feature : characterFeatures) {
             std::cout << "- " << feature << std::endl;
         }
+
+        // Assign 2-3 random features to each of the 24 characters
+        int numCharacters = 24;
+        int numFeatures = characterFeatures.size();
+
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> numFeaturesDist(2, 3); // Each character has 2-3 features
+        std::uniform_int_distribution<> featureIndexDist(0, numFeatures - 1); // Index for random feature
+
+        std::vector<std::vector<std::string>> characterTraits(numCharacters); // Store features for each character
+
+        for (int i = 0; i < numCharacters; ++i) {
+            int numCharFeatures = numFeaturesDist(gen); // Number of features for this character
+            std::vector<int> usedFeatureIndices; // Keep track of used feature indices to avoid duplicates
+
+            for (int j = 0; j < numCharFeatures; ++j) {
+                int featureIndex;
+                // Ensure we don't use the same feature twice for one character
+                do {
+                    featureIndex = featureIndexDist(gen);
+                } while (std::find(usedFeatureIndices.begin(), usedFeatureIndices.end(), featureIndex) != usedFeatureIndices.end());
+
+                usedFeatureIndices.push_back(featureIndex);
+                characterTraits[i].push_back(characterFeatures[featureIndex]); // Assign the feature to the character
+            }
+        }
+
+        std::cout << "\nCharacter Traits:" << std::endl;
+        for (int i = 0; i < numCharacters; ++i) {
+            std::cout << "Character " << i + 1 << ": ";
+            for (size_t j = 0; j < characterTraits[i].size(); ++j) {
+                std::cout << characterTraits[i][j];
+                if (j < characterTraits[i].size() - 1) {
+                    std::cout << ", ";
+                }
+            }
+            std::cout << std::endl;
+        }
     } else {
         std::cout << "No character features found." << std::endl;
     }
