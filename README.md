@@ -25,7 +25,7 @@ After compiling, you can run the game:
 
 ## Usage
 
-When you run the game, you will be prompted to enter a theme. You can either enter a theme of your choice or leave it blank to have the LLM generate a random theme for you. After the theme is selected, the LLM will generate a set of character features. The game will then assign a character to you, and the LLM will start asking questions to guess your character.
+When you run the game, you will be prompted to enter a theme. You can either enter a theme of your choice or leave it blank to have the LLM generate a random theme for you. After the theme is selected, the LLM will generate a set of character features. The game will then assign a character to you, and the LLM will start asking questions to guess your character. The LLM will ask a series of yes/no questions, and based on your answers, it will attempt to narrow down the possibilities and eventually guess your character. The game currently runs for a fixed number of rounds.
 
 ## Example
 
@@ -39,43 +39,45 @@ Here's an example of how to run the game and the kind of output you can expect:
 Enter a theme for the game (or leave blank for a random theme): Capybara
 Using theme: Capybara
 Character features:
-- Wearing sunglasses
-- Has a flower on head
-- Large front teeth
-- Wet fur
-- Eating a carrot
-- Has a shell on back
-- Missing a toe
-- Wearing a bandana
+- Wearing Sunglasses
+- Has a Flower Behind Ear
+- Wet Fur
+- Missing a Tooth
+- Wearing a Bandana
+- Long Whiskers
+- Has a Small Scar
+- Eating a Fruit
 
 Character Traits:
-Character 1: Missing a toe, Wet fur
-Character 2: Has a shell on back, Has a flower on head
-Character 3: Missing a toe, Eating a carrot
-Character 4: Missing a toe, Wet fur
-Character 5: Wearing a bandana, Has a flower on head
-Character 6: Large front teeth, Has a shell on back, Wet fur
-Character 7: Wet fur, Has a flower on head, Large front teeth
-Character 8: Eating a carrot, Wearing sunglasses
-Character 9: Wet fur, Large front teeth, Missing a toe
-Character 10: Large front teeth, Wearing sunglasses
-Character 11: Missing a toe, Large front teeth, Eating a carrot
-Character 12: Wearing sunglasses, Has a flower on head, Has a shell on back
-Character 13: Has a shell on back, Wet fur, Large front teeth
-Character 14: Has a flower on head, Wearing a bandana
-Character 15: Wearing sunglasses, Large front teeth
-Character 16: Wearing sunglasses, Eating a carrot, Wearing a bandana
-Character 17: Wet fur, Wearing sunglasses
-Character 18: Eating a carrot, Has a flower on head
-Character 19: Missing a toe, Wet fur
-Character 20: Wearing a bandana, Eating a carrot, Large front teeth
-Character 21: Eating a carrot, Wearing sunglasses, Wet fur
-Character 22: Wearing a bandana, Missing a toe, Has a flower on head
-Character 23: Missing a toe, Has a flower on head
-Character 24: Eating a carrot, Wet fur
+Character 1: Eating a Fruit, Wearing a Bandana
+Character 2: Has a Flower Behind Ear, Wearing a Bandana, Long Whiskers
+Character 3: Wearing a Bandana, Eating a Fruit, Missing a Tooth
+Character 4: Long Whiskers, Has a Flower Behind Ear
+Character 5: Wearing a Bandana, Missing a Tooth, Has a Small Scar
+Character 6: Wearing a Bandana, Wearing Sunglasses
+Character 7: Missing a Tooth, Long Whiskers, Wet Fur
+Character 8: Has a Small Scar, Missing a Tooth
+Character 9: Has a Small Scar, Wet Fur
+Character 10: Wearing a Bandana, Has a Small Scar
+Character 11: Has a Flower Behind Ear, Long Whiskers, Wearing a Bandana
+Character 12: Wearing a Bandana, Missing a Tooth, Eating a Fruit
+Character 13: Wearing a Bandana, Wearing Sunglasses
+Character 14: Missing a Tooth, Long Whiskers
+Character 15: Has a Flower Behind Ear, Missing a Tooth
+Character 16: Has a Small Scar, Wearing a Bandana, Has a Flower Behind Ear
+Character 17: Wearing Sunglasses, Long Whiskers
+Character 18: Wearing a Bandana, Has a Small Scar
+Character 19: Has a Flower Behind Ear, Long Whiskers
+Character 20: Has a Small Scar, Has a Flower Behind Ear, Wearing Sunglasses
+Character 21: Missing a Tooth, Wet Fur
+Character 22: Wearing a Bandana, Has a Flower Behind Ear
+Character 23: Has a Small Scar, Long Whiskers, Missing a Tooth
+Character 24: Wearing a Bandana, Wearing Sunglasses, Long Whiskers
 
-You are character number 16
-LLM asks: Does the character have a shell on their back?
+You are character number 21
+LLM asks: Is the character wearing sunglasses?
+Is this true for your character? (yes/no): no
+LLM suggests eliminating characters: 6, 13, 17, 20, 24
 ```
 
 ## Flowchart
@@ -94,6 +96,9 @@ LLM asks: Does the character have a shell on their back?
     I --> J[Assign LLM Character];
     J --> K[Display Player Character];
     K --> L[LLM Guesses];
+    L --> N{User Answers Question};
+    N --> O[LLM Removes Possibilities];
+    O --> L;
     L --> M[End];
     H --> M;
 ```
