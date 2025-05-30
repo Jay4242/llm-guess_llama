@@ -13,4 +13,22 @@ This is a C++ implementation of the classic "Guess Who?" game. The game uses an 
 
 To compile the game, you need to have `g++`, `curl`, and `rapidjson` installed. Use the following command:
 
-g++ guess_llama.cpp -lcurl -o guess_llama && ./guess_llama
+`g++ guess_llama.cpp -lcurl -o guess_llama && ./guess_llama`
+
+
+```mermaid
+        graph TD
+    A[Start] --> B{Get Theme Input};
+    B -- Empty --> C[Get Theme from LLM];
+    B -- Not Empty --> D[Use User-Provided Theme];
+    C --> E[Get Character Features from LLM];
+    D --> E;
+    E --> F{Character Features Found?};
+    F -- Yes --> G[Assign Features to Characters];
+    F -- No --> H[Display Error];
+    G --> I[Assign Player Character];
+    I --> J[Assign LLM Character];
+    J --> K[Display Player Character];
+    K --> L[End];
+    H --> L;
+```
