@@ -268,6 +268,58 @@ std::vector<std::string> getCharacterFeatures(const std::string& theme) {
     return {};
 }
 
+// Function for the LLM to make a guessing round
+std::string llmGuessingRound(const std::vector<std::vector<std::string>>& characterTraits, int llmCharacter, const std::string& theme) {
+    std::string preprompt = "The following is the current character list for the theme '" + theme + "':";
+    std::string postprompt = "Given this list of characters and their traits, ask a question about a single trait that will help narrow down the list of possible characters. Only ask the question and nothing else.";
+    double temperature = 0.7;
+
+    std::stringstream characterListStream;
+    for (size_t i = 0; i < characterTraits.size(); ++i) {
+        if ((int)i == llmCharacter) continue; // Skip the LLM's own character
+
+        characterListStream << "user: Character " << i + 1 << ": ";
+        for (size_t j = 0; j < characterTraits[i].size(); ++j) {
+            characterListStream << characterTraits[i][j];
+            if (j < characterTraits[i].size() - 1) {
+                characterListStream << ", ";
+            }
+        }
+        characterListStream << "\n";
+    }
+    std::string characterList = characterListStream.str();
+
+    // Escape newline characters
+    std::string escapedCharacterList;
+    for (char c : characterList) {
+        if (c == '\n') {
+            escapedCharacterList += "\\n";
+        } else {
+            escapedCharacterList += c;
+        }
+    }
+
+    std::string prompt = preprompt + "\\n" + "user:\\n" + escapedCharacterList + "\\n" + "user:\\n" + postprompt;
+    std::string llmResponse = getLLMResponse(prompt, temperature);
+
+    // Parse the JSON response
+    rapidjson::Document doc;
+    doc.Parse(llmResponse.c_str());
+
+    if (doc.HasParseError()) {
+        std::cerr << "Error: Failed to parse JSON: " << doc.GetParseError() << std::endl;
+        return "Error: Could not parse LLM response.";
+    }
+
+    if (!doc.IsObject() || !doc.HasMember("choices") || !doc["choices"].IsArray() || doc["choices"].Empty() || !doc["choices"][0].IsObject() || !doc["choices"][0].HasMember("message") || !doc["choices"][0]["message"].IsObject() || !doc["choices"][0]["message"].HasMember("content") || !doc["choices"][0]["message"]["content"].IsString()) {
+        std::cerr << "Error: Unexpected JSON format." << std::endl;
+        return "Error: Unexpected LLM response format.";
+    }
+
+    std::string content = doc["choices"][0]["message"]["content"].GetString();
+    return content;
+}
+
 int main() {
     std::cout << "Guess Who? functionality will be implemented here." << std::endl;
 
@@ -308,6 +360,7 @@ int main() {
         std::mt19937 gen(rd());
         std::uniform_int_distribution<> numFeaturesDist(2, 3); // Each character has 2-3 features
         std::uniform_int_distribution<> featureIndexDist(0, numFeatures - 1); // Index for random feature
+        std::uniform_int_distribution<> characterDist(0, numCharacters - 1); // Index for random character
 
         std::vector<std::vector<std::string>> characterTraits(numCharacters); // Store features for each character
 
@@ -338,6 +391,21 @@ int main() {
             }
             std::cout << std::endl;
         }
+
+        // Assign random character to player
+        int playerCharacter = characterDist(gen);
+        std::cout << "\nYou are character number " << playerCharacter + 1 << std::endl;
+
+        // Assign random character to LLM, making sure it's different from the player's
+        int llmCharacter;
+        do {
+            llmCharacter = characterDist(gen);
+        } while (llmCharacter == playerCharacter);
+
+        // Example usage of the llmGuessingRound function
+        std::string llmGuess = llmGuessingRound(characterTraits, llmCharacter, theme);
+        std::cout << "LLM asks: " << llmGuess << std::endl;
+
     } else {
         std::cout << "No character features found." << std::endl;
     }
