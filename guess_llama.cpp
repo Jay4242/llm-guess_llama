@@ -12,6 +12,7 @@
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include <random>   // Required for random number generation
+#include <utility> // Required for std::pair
 
 // Define the LLM server address
 std::string llmServerAddress = "http://localhost:9090";
@@ -268,10 +269,28 @@ std::vector<std::string> getCharacterFeatures(const std::string& theme) {
     return {};
 }
 
+// Function to get yes/no input from the user
+bool getYesNoInput(const std::string& question) {
+    std::string answer;
+    while (true) {
+        std::cout << question << " (yes/no): ";
+        std::getline(std::cin, answer);
+        std::transform(answer.begin(), answer.end(), answer.begin(), ::tolower); // Convert to lowercase
+        if (answer == "yes") {
+            return true;
+        } else if (answer == "no") {
+            return false;
+        } else {
+            std::cout << "Invalid input. Please enter 'yes' or 'no'." << std::endl;
+        }
+    }
+}
+
 // Function for the LLM to make a guessing round
-std::string llmGuessingRound(const std::vector<std::vector<std::string>>& characterTraits, int llmCharacter, const std::string& theme) {
+std::pair<std::string, std::vector<int>> llmGuessingRound(const std::vector<std::vector<std::string>>& characterTraits, int llmCharacter, const std::string& theme) {
     std::string preprompt = "The following is the current character list for the theme '" + theme + "':";
-    std::string postprompt = "Given this list of characters and their traits, ask a question about a single trait that will help narrow down the list of possible characters. Only ask the question and nothing else.";
+    std::string questionPrompt = "Given this list of characters and their traits, formulate a yes/no question that will help you narrow down the possibilities. The question should be about a single trait. Return the question as a string, only the question and nothing else.";
+    std::string postprompt = "Given this list of characters and their traits, and the answer to the question was '[ANSWER]', which characters should I eliminate as possibilities? Return a JSON list of integers, only the character numbers and nothing else.";
     double temperature = 0.7;
 
     std::stringstream characterListStream;
@@ -299,29 +318,94 @@ std::string llmGuessingRound(const std::vector<std::vector<std::string>>& charac
         }
     }
 
-    std::string prompt = preprompt + "\\n" + "user:\\n" + escapedCharacterList + "\\n" + "user:\\n" + postprompt;
-    std::string llmResponse = getLLMResponse(prompt, temperature);
+    // Construct the prompt for the question
+    std::string questionPromptFull = preprompt + "\\n" + "user:\\n" + escapedCharacterList + "\\n" + "user:\\n" + questionPrompt;
+    std::string llmQuestionResponse = getLLMResponse(questionPromptFull, temperature);
 
-    // Parse the JSON response
-    rapidjson::Document doc;
-    doc.Parse(llmResponse.c_str());
+    // Parse the JSON response for the question
+    rapidjson::Document questionDoc;
+    questionDoc.Parse(llmQuestionResponse.c_str());
 
-    if (doc.HasParseError()) {
-        std::cerr << "Error: Failed to parse JSON: " << doc.GetParseError() << std::endl;
-        return "Error: Could not parse LLM response.";
+    if (questionDoc.HasParseError()) {
+        std::cerr << "Error: Failed to parse JSON for question: " << questionDoc.GetParseError() << std::endl;
+        return {"", {}}; // Return empty question and empty vector on error
     }
 
-    if (!doc.IsObject() || !doc.HasMember("choices") || !doc["choices"].IsArray() || doc["choices"].Empty() || !doc["choices"][0].IsObject() || !doc["choices"][0].HasMember("message") || !doc["choices"][0]["message"].IsObject() || !doc["choices"][0]["message"].HasMember("content") || !doc["choices"][0]["message"]["content"].IsString()) {
-        std::cerr << "Error: Unexpected JSON format." << std::endl;
-        return "Error: Unexpected LLM response format.";
+    if (!questionDoc.IsObject() || !questionDoc.HasMember("choices") || !questionDoc["choices"].IsArray() || questionDoc["choices"].Empty() || !questionDoc["choices"][0].IsObject() || !questionDoc["choices"][0].HasMember("message") || !questionDoc["choices"][0]["message"].IsObject() || !questionDoc["choices"][0]["message"].HasMember("content") || !questionDoc["choices"][0]["message"]["content"].IsString()) {
+        std::cerr << "Error: Unexpected JSON format for question." << std::endl;
+        return {"", {}}; // Return empty question and empty vector on error
     }
 
-    std::string content = doc["choices"][0]["message"]["content"].GetString();
-    return content;
+    std::string questionContent = questionDoc["choices"][0]["message"]["content"].GetString();
+
+    // Remove ```json and ``` if present
+    size_t startPos = questionContent.find("```json");
+    if (startPos != std::string::npos) {
+        questionContent.erase(startPos, 7);
+    }
+    size_t endPos = questionContent.find("```");
+    if (endPos != std::string::npos) {
+        questionContent.erase(endPos, 3);
+    }
+
+    // Remove leading/trailing newline characters
+    questionContent.erase(0, questionContent.find_first_not_of("\n"));
+    questionContent.erase(questionContent.find_last_not_of("\n") + 1);
+
+    // Ask the question to the user
+    std::cout << "LLM asks: " << questionContent << std::endl;
+    bool answer = getYesNoInput("Is this true for your character?");
+
+    // Construct the prompt for the characters to eliminate
+    std::string answerString = answer ? "yes" : "no";
+    std::string eliminationPromptFull = preprompt + "\\n" + "user:\\n" + escapedCharacterList + "\\n" + "user:\\n" + "The question was: '" + questionContent + "' and the answer was: '" + answerString + "'. " + postprompt;
+    std::string llmEliminationResponse = getLLMResponse(eliminationPromptFull, temperature);
+
+    // Parse the JSON response for the characters to eliminate
+    rapidjson::Document eliminationDoc;
+    eliminationDoc.Parse(llmEliminationResponse.c_str());
+
+    std::vector<int> charactersToEliminate;
+    if (eliminationDoc.HasParseError()) {
+        std::cerr << "Error: Failed to parse JSON for elimination: " << eliminationDoc.GetParseError() << std::endl;
+    } else if (!eliminationDoc.IsObject() || !eliminationDoc.HasMember("choices") || !eliminationDoc["choices"].IsArray() || eliminationDoc["choices"].Empty() || !eliminationDoc["choices"][0].IsObject() || !eliminationDoc["choices"][0].HasMember("message") || !eliminationDoc["choices"][0]["message"].IsObject() || !eliminationDoc["choices"][0]["message"].HasMember("content") || !eliminationDoc["choices"][0]["message"]["content"].IsString()) {
+        std::cerr << "Error: Unexpected JSON format for elimination." << std::endl;
+    } else {
+        std::string eliminationContent = eliminationDoc["choices"][0]["message"]["content"].GetString();
+
+        // Remove ```json and ``` if present
+        size_t startPos = eliminationContent.find("```json");
+        if (startPos != std::string::npos) {
+            eliminationContent.erase(startPos, 7);
+        }
+        size_t endPos = eliminationContent.find("```");
+        if (endPos != std::string::npos) {
+            eliminationContent.erase(endPos, 3);
+        }
+
+        // Remove leading/trailing newline characters
+        eliminationContent.erase(0, eliminationContent.find_first_not_of("\n"));
+        eliminationContent.erase(eliminationContent.find_last_not_of("\n") + 1);
+
+        // Parse the content as a JSON array
+        rapidjson::Document contentDoc;
+        contentDoc.Parse(eliminationContent.c_str());
+
+        if (contentDoc.HasParseError() || !contentDoc.IsArray()) {
+            std::cerr << "Error: Failed to parse content as JSON array for elimination." << std::endl;
+        } else {
+            for (rapidjson::SizeType i = 0; i < contentDoc.Size(); i++) {
+                if (contentDoc[i].IsInt()) {
+                    charactersToEliminate.push_back(contentDoc[i].GetInt());
+                }
+            }
+        }
+    }
+
+    return {questionContent, charactersToEliminate};
 }
 
 int main() {
-    std::cout << "Guess Who? functionality will be implemented here." << std::endl;
 
     // Prompt for theme
     std::string theme;
@@ -402,9 +486,24 @@ int main() {
             llmCharacter = characterDist(gen);
         } while (llmCharacter == playerCharacter);
 
-        // Example usage of the llmGuessingRound function
-        std::string llmGuess = llmGuessingRound(characterTraits, llmCharacter, theme);
-        std::cout << "LLM asks: " << llmGuess << std::endl;
+        // Game loop
+        int rounds = 5;
+        for (int round = 0; round < rounds; ++round) {
+            // Example usage of the llmGuessingRound function
+            std::pair<std::string, std::vector<int>> llmGuessResult = llmGuessingRound(characterTraits, llmCharacter, theme);
+            std::string llmGuess = llmGuessResult.first;
+            std::vector<int> charactersToEliminate = llmGuessResult.second;
+
+            // Print the characters to eliminate
+            std::cout << "LLM suggests eliminating characters: ";
+            for (size_t i = 0; i < charactersToEliminate.size(); ++i) {
+                std::cout << charactersToEliminate[i];
+                if (i < charactersToEliminate.size() - 1) {
+                    std::cout << ", ";
+                }
+            }
+            std::cout << std::endl;
+        }
 
     } else {
         std::cout << "No character features found." << std::endl;
