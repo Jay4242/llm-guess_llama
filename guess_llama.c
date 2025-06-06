@@ -1056,7 +1056,8 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
 
             // Draw the player's character image
             if (playerTexture.id != 0) {
-                DrawTextureEx(playerTexture, (Vector2){10, 160}, 0.25f, 0.25f, WHITE); // Draw at (10, 160) scaled to 0.25
+                // MODIFIED: Draw at (195.2, 170) scaled to 0.8
+                DrawTextureEx(playerTexture, (Vector2){195.2f, 170.0f}, 0.8f, 0.8f, WHITE); 
             }
 
             // Draw the question
@@ -1066,8 +1067,8 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             Rectangle yesButton = {100, 120, 80, 30};
             Rectangle noButton = {200, 120, 80, 30};
             DrawRectangleRec(yesButton, GREEN);
-            DrawRectangleRec(noButton, RED);
             DrawText("Yes", yesButton.x + 20, yesButton.y + 5, 20, WHITE);
+            DrawRectangleRec(noButton, RED);
             DrawText("No", noButton.x + 20, noButton.y + 5, 20, WHITE);
 
             EndDrawing();
@@ -1303,9 +1304,10 @@ int main() {
         DrawRectangleRec(llmThemeButton, ORANGE);
         DrawText("LLM Random Theme", llmThemeButton.x + 5, llmThemeButton.y + 8, 20, BLACK);
 
-        if (themeEntered) {
-            DrawText("Press SPACE to continue", 100, 150, 20, GRAY);
-        }
+        // Removed: "Press SPACE to continue" text
+        // if (themeEntered) {
+        //     DrawText("Press SPACE to continue", 100, 150, 20, GRAY);
+        // }
 
         EndDrawing();
 
@@ -1587,7 +1589,8 @@ int main() {
 
             DrawText(playerCharacterString, 10, 10, 20, BLACK);
             // Example: Draw a button to start the LLM guessing round
-            Rectangle startGuessingButton = {10, 70, 200, 30};
+            // MODIFIED: Increased button width
+            Rectangle startGuessingButton = {10, 70, 250, 30}; 
             DrawRectangleRec(startGuessingButton, BLUE);
             DrawText("Start Guessing Round", startGuessingButton.x + 5, startGuessingButton.y + 8, 20, WHITE);
 
