@@ -102,10 +102,10 @@ The game currently focuses on the LLM's guessing process and does not have expli
     O --> P[Assign LLM Character];
     P --> Q[Initialize Remaining Characters List];
     Q --> R[Display Player Character & Game UI];
-    R --> S{User Clicks "Start Guessing Round"};
+    R --> S{User Clicks Start Guessing Round};
     S --> T[LLM Formulates Question];
-    T --> U[Ask Question to User (GUI)];
-    U --> V{User Answers (Yes/No Buttons)};
+    T --> U[Ask Question to User GUI];
+    U --> V{User Answers Yes/No Buttons};
     V --> W[LLM Eliminates Characters];
     W --> X[Update Remaining Characters List];
     X --> T;
