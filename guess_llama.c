@@ -1004,6 +1004,7 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
         if (!root) {
             fprintf(stderr, "Error parsing JSON: %s\n", error.text);
             free(llmQuestionResponse);
+            if (characterList) free(characterList);
             return;
         }
 
@@ -1013,6 +1014,7 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             fprintf(stderr, "Raw LLM Response: %s\n", llmQuestionResponse); // Print the raw response for debugging
             json_decref(root);
             free(llmQuestionResponse);
+            if (characterList) free(characterList);
             return;
         }
 
@@ -1021,6 +1023,7 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             fprintf(stderr, "Error: First choice is not an object.\n");
             json_decref(root);
             free(llmQuestionResponse);
+            if (characterList) free(characterList);
             return;
         }
 
@@ -1029,6 +1032,7 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             fprintf(stderr, "Error: 'message' is not an object.\n");
             json_decref(root);
             free(llmQuestionResponse);
+            if (characterList) free(characterList);
             return;
         }
 
@@ -1037,6 +1041,7 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             fprintf(stderr, "Error: 'content' is not a string.\n");
             json_decref(root);
             free(llmQuestionResponse);
+            if (characterList) free(characterList);
             return;
         }
 
@@ -1086,20 +1091,36 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             // Handle window close event
             json_decref(root);
             free(llmQuestionResponse);
+            if (characterList) free(characterList);
             return;
         }
 
         // Construct the prompt for the LLM to determine which characters to eliminate
         char* eliminationPrompt;
         const char* answerString = currentAnswer ? "yes" : "no";
-        if (asprintf(&eliminationPrompt, "Given the theme '%s', the question '%s' was asked, and the answer was '%s'.  Given the following list of characters and their traits: %s Which characters should be eliminated? Return a JSON list of integers, only the character numbers and nothing else.", theme, question, answerString, characterList ? characterList : "") == -1) {
+
+        char* eliminationInstruction = NULL;
+        if (currentAnswer == 0) { // User said NO
+            if (asprintf(&eliminationInstruction, "This means the player's character does NOT have the feature asked about. Therefore, eliminate all characters from the list that *do* have the feature asked about.") == -1) {
+                fprintf(stderr, "Failed to construct elimination instruction for NO\n");
+            }
+        } else { // User said YES
+            if (asprintf(&eliminationInstruction, "This means the player's character DOES have the feature asked about. Therefore, eliminate all characters from the list that *do not* have the feature asked about.") == -1) {
+                fprintf(stderr, "Failed to construct elimination instruction for YES\n");
+            }
+        }
+
+        if (asprintf(&eliminationPrompt, "Given the theme '%s', the question '%s' was asked, and the answer was '%s'. Given the following list of characters and their traits: %s %s Return a JSON list of integers, only the character numbers and nothing else.", theme, question, answerString, characterList ? characterList : "", eliminationInstruction ? eliminationInstruction : "") == -1) {
             fprintf(stderr, "Failed to construct elimination prompt\n");
-            free(characterList);
+            if (characterList) free(characterList);
             json_decref(root);
             free(llmQuestionResponse);
+            if (eliminationInstruction) free(eliminationInstruction);
             return;
         }
-        free(characterList);
+        if (eliminationInstruction) free(eliminationInstruction); // Free the instruction string
+
+        free(characterList); // Free characterList after it's used in eliminationPrompt
 
         printf("Elimination Prompt sent to LLM:\n%s\n", eliminationPrompt);
 
@@ -1218,6 +1239,7 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
         free(llmQuestionResponse);
     } else {
         fprintf(stderr, "Failed to get response from LLM\n");
+        if (characterList) free(characterList);
     }
 }
 
@@ -1297,7 +1319,7 @@ int main() {
         DrawRectangleRec(themeInputBox, LIGHTGRAY);
         DrawText(theme, themeInputBox.x + 5, themeInputBox.y + 8, 20, BLACK);
         if (themeInputSelected) {
-            DrawRectangleLines(themeInputBox.x, themeInputBox.y, themeInputBox.width, themeInputBox.height, BLUE);
+            DrawRectangleLines(themeInputBox.x, themeInputBox.y, themeInputBox.height, themeInputBox.height, BLUE);
         }
 
         // LLM Theme Button
