@@ -1319,7 +1319,7 @@ int main() {
         DrawRectangleRec(themeInputBox, LIGHTGRAY);
         DrawText(theme, themeInputBox.x + 5, themeInputBox.y + 8, 20, BLACK);
         if (themeInputSelected) {
-            DrawRectangleLines(themeInputBox.x, themeInputBox.y, themeInputBox.height, themeInputBox.height, BLUE);
+            DrawRectangleLines(themeInputBox.x, themeInputBox.y, themeInputBox.width, themeInputBox.height, BLUE);
         }
 
         // LLM Theme Button
