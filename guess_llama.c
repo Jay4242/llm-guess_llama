@@ -659,7 +659,7 @@ char** getThemesFromLLM(int* themeCount) {
     char** themes = NULL;
     *themeCount = 0;
 
-    const char* prompt = "Suggest 10 themes for a 'Guess Who?' game. The theme should be who the characters in the game are. For example: clowns, shih-tzu dogs, penguins, llamas, etc. Feel free to be creative and random. Return a JSON list of strings, only the themes and nothing else.";
+    const char* prompt = "Suggest 10 themes for a 'Guess Who?' game. The theme should be who the characters in the game are, and should be a singular noun. For example: 'clown', 'shih-tzu dog', 'penguin', 'llama', etc. Feel free to be creative and random. Return a JSON list of strings, only the themes and nothing else.";
     double temperature = 1.0;
     char* llmResponse = getLLMResponse(prompt, temperature);
 
@@ -983,7 +983,7 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
     }
 
     // Construct the question prompt
-    if (asprintf(&questionPrompt, "Given the theme '%s' and the following list of characters and their traits: %s Formulate a yes/no question that will help you narrow down the possibilities. The question should be about a single trait from the list of character features. Return the question as a string, only the question and nothing else.", theme, characterList ? characterList : "") == -1) {
+    if (asprintf(&questionPrompt, "Given the theme '%s' and the following list of characters and their traits: %s Your goal is to guess the player's character, which is one of the characters in this list. Formulate a yes/no question that will help you narrow down the possibilities. The question should be about a single trait from the list of character features. Return the question as a string, only the question and nothing else.", theme, characterList ? characterList : "") == -1) {
         fprintf(stderr, "Failed to construct question prompt\n");
         free(characterList);
         return;
