@@ -5,14 +5,36 @@
 #include <time.h>
 #include <pthread.h>
 #include <raylib.h>
-#include <curl/curl.h>
 #include <time.h>
 #include <unistd.h>
 #include <jansson.h>
+#include <sys/stat.h> // For stat, mkdir
+#include <dirent.h>   // For opendir, readdir, closedir
+#include <errno.h>    // For errno
+#include <ctype.h>    // For tolower, isalnum
 
 // Define screen dimensions
 #define SCREEN_WIDTH 800
 #define SCREEN_HEIGHT 600
+#define NUM_CHARACTERS 24 // Define numCharacters as a constant
+#define MAX_PATH_BUFFER_SIZE 2048 // Max length for directory paths (e.g., imageDirectoryPath)
+// Max length for full file paths, considering MAX_PATH_BUFFER_SIZE + max filename length (e.g., 255 for NAME_MAX) + '/' + null terminator
+#define MAX_FILEPATH_BUFFER_SIZE (MAX_PATH_BUFFER_SIZE + 256) 
+
+// Game States
+typedef enum {
+    GAME_STATE_THEME_SELECTION,
+    GAME_STATE_THEME_READY, // New state for "Press SPACE to continue"
+    GAME_STATE_IMAGE_GENERATION,
+    GAME_STATE_CONFIRM_REGENERATE_IMAGES, // New state for prompting image re-creation
+    GAME_STATE_PLAYING,
+    GAME_STATE_PLAYER_WINS,
+    GAME_STATE_LLM_WINS, // Placeholder for future LLM win condition
+    GAME_STATE_EXIT
+} GameState;
+
+// Global game state variable
+GameState currentGameState = GAME_STATE_THEME_SELECTION;
 
 // Global variables for yes/no question
 char currentQuestion[256] = {0};
@@ -31,7 +53,31 @@ bool generating_images = false;
 int total_characters_to_generate = 0;
 int characters_generated_count = 0;
 char generation_status_message[256] = {0};
-pthread_t image_gen_master_thread; // Declare the global thread variable here
+pthread_t image_gen_master_thread = (pthread_t)0; // Declare the global thread variable here, initialized to 0
+
+// New global variables for setup thread
+pthread_t gameSetupThreadId;
+bool setup_in_progress = false;
+
+// New global variables for image directory and regeneration prompt
+char formattedThemeName[256] = {0};
+char imageDirectoryPath[MAX_PATH_BUFFER_SIZE] = {0}; // Increased size for full path
+bool confirm_regen_prompt_active = false;
+int regen_choice = -1; // -1: no choice, 0: no, 1: yes
+pthread_cond_t regen_cond; // Condition variable for waiting on user input
+
+// Global variables for game data (populated by gameSetupThread)
+char* selectedTheme = NULL;
+char** characterFeatures = NULL;
+char*** characterTraits = NULL;
+int featureCount = 0;
+int playerCharacter = -1;
+int llmCharacter = -1;
+int* charactersRemaining = NULL;
+int remainingCount = 0;
+
+// Function prototypes
+void DrawImageGenerationProgressScreen(void);
 
 // Global variable for player's character texture
 Texture2D playerCharacterTexture = { 0 };
@@ -132,7 +178,6 @@ char* make_http_get(const char* url) {
     CURLcode res;
     ResponseData response_data = {NULL, 0};
 
-    curl_global_init(CURL_GLOBAL_DEFAULT);
     curl = curl_easy_init();
     if (curl) {
         //printf("GET URL: %s\n", url);
@@ -150,13 +195,13 @@ char* make_http_get(const char* url) {
         if (res != CURLE_OK) {
             fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
             curl_easy_cleanup(curl);
-            curl_global_cleanup();
             return NULL;
         }
 
         curl_easy_cleanup(curl);
+    } else {
+        fprintf(stderr, "curl_easy_init() failed\n");
     }
-    curl_global_cleanup();
 
     return response_data.data;
 }
@@ -168,7 +213,6 @@ char* make_http_post(const char* url, const char* data) {
     ResponseData response_data = {NULL, 0};
     struct curl_slist *headers = NULL;
 
-    curl_global_init(CURL_GLOBAL_DEFAULT);
     curl = curl_easy_init();
     if (curl) {
         //printf("POST URL: %s\n", url);
@@ -205,14 +249,14 @@ char* make_http_post(const char* url, const char* data) {
         if (res != CURLE_OK) {
             fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
             curl_easy_cleanup(curl);
-            curl_global_cleanup();
             if (headers) curl_slist_free_all(headers);
             return NULL;
         }
 
         curl_easy_cleanup(curl);
+    } else {
+        fprintf(stderr, "curl_easy_init() failed\n");
     }
-    curl_global_cleanup();
     if (headers) curl_slist_free_all(headers);
 
     return response_data.data;
@@ -224,7 +268,6 @@ char* getLLMResponse(const char* prompt, double temperature) {
     CURLcode res;
     ResponseData response = {NULL, 0};
 
-    curl_global_init(CURL_GLOBAL_DEFAULT);
     curl = curl_easy_init();
     if (curl) {
         // Construct the URL
@@ -232,7 +275,6 @@ char* getLLMResponse(const char* prompt, double temperature) {
         if (asprintf(&url, "%s/v1/chat/completions", llmServerAddress) == -1) {
             fprintf(stderr, "Failed to construct URL\n");
             curl_easy_cleanup(curl);
-            curl_global_cleanup();
             return NULL;
         }
 
@@ -243,7 +285,6 @@ char* getLLMResponse(const char* prompt, double temperature) {
         if (asprintf(&data, "{\"model\": \"llama-3.2-3b-it-q8_0\", \"messages\": [{\"role\": \"system\", \"content\": \"You are a helpful assistant.\"}, {\"role\": \"user\", \"content\": \"%s\"}], \"temperature\": %f}", prompt, temperature) == -1) {
             fprintf(stderr, "Failed to construct JSON payload\n");
             curl_easy_cleanup(curl);
-            curl_global_cleanup();
             free(url);
             return NULL;
         }
@@ -252,10 +293,7 @@ char* getLLMResponse(const char* prompt, double temperature) {
         curl_easy_setopt(curl, CURLOPT_POST, 1L);
 
         // Set the POST data
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data);
-
-        // Set the data length
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)strlen(data));
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data); // Use data directly, curl will handle length
 
         // Set the callback function to write the response
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback); // Use write_callback
@@ -274,8 +312,8 @@ char* getLLMResponse(const char* prompt, double temperature) {
             fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
             curl_easy_cleanup(curl);
             curl_slist_free_all(headers);
-            curl_global_cleanup();
             free(url);
+            free(data); // Free data here
             return NULL;
         }
 
@@ -283,19 +321,438 @@ char* getLLMResponse(const char* prompt, double temperature) {
         curl_easy_cleanup(curl);
         curl_slist_free_all(headers);
         free(url);
+        free(data); // Free data here
     } else {
-        curl_global_cleanup();
         fprintf(stderr, "curl_easy_init() failed\n");
         return NULL;
     }
-    curl_global_cleanup();
 
     return response.data;
 }
 
+// Helper function to parse a single JSON object from a string and extract progress
+void parse_progress_json(const char* json_string) {
+    json_error_t stream_error;
+    json_t* stream_data = json_loads(json_string, 0, &stream_error);
+    if (!stream_data) {
+        // This can happen if the stream contains non-JSON data or incomplete JSON.
+        // It's often just noise in the stream, so we print a debug message and continue.
+        // fprintf(stderr, "Error parsing stream JSON object: %s (Content: %s)\n", stream_error.text, json_string);
+        return;
+    }
+
+    json_t* steps_json = json_object_get(stream_data, "step");
+    json_t* total_steps_json = json_object_get(stream_data, "total_steps");
+
+    if (steps_json && total_steps_json && json_is_number(steps_json) && json_is_number(total_steps_json)) {
+        int steps = json_integer_value(steps_json);
+        int total_steps = json_integer_value(total_steps_json);
+        if (total_steps > 0) {
+            float percentage = (float)steps / total_steps * 100;
+            pthread_mutex_lock(&mutex);
+            snprintf(current_percent, sizeof(current_percent), "%.0f%%", percentage);
+            pthread_mutex_unlock(&mutex);
+        }
+    }
+    json_decref(stream_data);
+}
+
+// Function to parse a stream of concatenated JSON objects
+void process_json_stream_response(const char* stream_response_raw) {
+    if (!stream_response_raw) return;
+
+    const char* current_ptr = stream_response_raw;
+    const char* end_of_response = stream_response_raw + strlen(stream_response_raw);
+
+    while (current_ptr < end_of_response) {
+        // Find the start of the next JSON object
+        const char* start = strchr(current_ptr, '{');
+        if (!start) break; // No more JSON objects
+
+        int brace_count = 0;
+        const char* end = start;
+        bool in_string = false;
+
+        // Iterate to find the matching closing brace
+        while (end < end_of_response) {
+            if (*end == '"' && (end == start || *(end - 1) != '\\')) { // Handle escaped quotes
+                in_string = !in_string;
+            } else if (!in_string) {
+                if (*end == '{') {
+                    brace_count++;
+                } else if (*end == '}') {
+                    brace_count--;
+                }
+            }
+
+            if (brace_count == 0 && *end == '}') {
+                // Found a complete JSON object
+                size_t obj_len = (end - start) + 1;
+                char* json_obj_str = (char*)malloc(obj_len + 1);
+                if (!json_obj_str) {
+                    fprintf(stderr, "Failed to allocate memory for JSON object.\n");
+                    return; // Critical error, exit function
+                }
+                strncpy(json_obj_str, start, obj_len);
+                json_obj_str[obj_len] = '\0';
+
+                parse_progress_json(json_obj_str);
+                free(json_obj_str);
+
+                current_ptr = end + 1; // Move past the current object
+                break; // Break from inner loop to find next object from current_ptr
+            }
+            end++;
+        }
+        if (brace_count != 0) { // If we reached end of string but braces didn't balance
+            // This indicates an incomplete or malformed JSON object at the end of the stream.
+            // We can log it but continue, as previous objects might have been valid.
+            // fprintf(stderr, "Incomplete JSON object or malformed stream at: %s\n", start);
+            break; // Stop processing this stream as it's malformed from this point
+        }
+    }
+}
+
+// --- New Helper Functions for Image System Refactor ---
+
+// Function to format the theme name for directory creation
+char* format_theme_name(const char* theme) {
+    if (!theme) return strdup("");
+
+    size_t len = strlen(theme);
+    char* formatted = (char*)malloc(len + 1); // Max possible length
+    if (!formatted) {
+        fprintf(stderr, "Failed to allocate memory for formatted theme name.\n");
+        return strdup("");
+    }
+
+    int j = 0;
+    for (size_t i = 0; i < len; ++i) {
+        char c = tolower((unsigned char)theme[i]);
+        if (isalnum(c)) { // Keep alphanumeric characters
+            formatted[j++] = c;
+        } else if (c == ' ') { // Replace spaces with underscores
+            formatted[j++] = '_';
+        }
+        // Other special characters are stripped
+    }
+    formatted[j] = '\0';
+    return formatted;
+}
+
+// Function to check if a directory exists
+bool directory_exists(const char* path) {
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+// Function to create a directory (and its parents if needed)
+int create_directory_recursive(const char* path) {
+    char* tmp = NULL;
+    char* p = NULL;
+    size_t len;
+    int ret = 0;
+
+    len = strlen(path);
+    tmp = strdup(path);
+    if (!tmp) {
+        fprintf(stderr, "Failed to allocate memory for path.\n");
+        return -1;
+    }
+
+    // Ensure path ends with a null terminator, not a slash for the loop
+    if (len > 0 && tmp[len - 1] == '/') tmp[len - 1] = '\0';
+
+    for (p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = 0; // Temporarily null-terminate to create parent directory
+            if (mkdir(tmp, S_IRWXU) != 0 && errno != EEXIST) {
+                fprintf(stderr, "Failed to create directory %s: %s\n", tmp, strerror(errno));
+                ret = -1;
+                break;
+            }
+            *p = '/'; // Restore slash
+        }
+    }
+    // Create the final directory
+    if (ret == 0 && mkdir(tmp, S_IRWXU) != 0 && errno != EEXIST) {
+        fprintf(stderr, "Failed to create directory %s: %s\n", tmp, strerror(errno));
+        ret = -1;
+    }
+    free(tmp);
+    return ret;
+}
+
+// Function to delete all files in a directory (non-recursive for subdirectories)
+int delete_files_in_directory(const char* path) {
+    DIR *d;
+    struct dirent *dir;
+    char filepath[MAX_FILEPATH_BUFFER_SIZE]; // Use MAX_FILEPATH_BUFFER_SIZE
+    int ret = 0;
+
+    d = opendir(path);
+    if (!d) {
+        fprintf(stderr, "Failed to open directory %s: %s\n", path, strerror(errno));
+        return -1;
+    }
+
+    while ((dir = readdir(d)) != NULL) {
+        if (strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0) {
+            continue;
+        }
+
+        snprintf(filepath, sizeof(filepath), "%s/%s", path, dir->d_name);
+        struct stat st;
+        if (stat(filepath, &st) == 0) {
+            if (S_ISREG(st.st_mode)) { // Only delete regular files
+                if (unlink(filepath) != 0) {
+                    fprintf(stderr, "Failed to delete file %s: %s\n", filepath, strerror(errno));
+                    ret = -1; // Continue trying to delete others
+                }
+            }
+            // Do not delete subdirectories or special files
+        } else {
+            fprintf(stderr, "Failed to stat file %s: %s\n", filepath, strerror(errno));
+            ret = -1;
+        }
+    }
+    closedir(d);
+    return ret;
+}
+
+// Function to save game data to a JSON file
+bool save_game_data(const char* filename, const char* theme, char** features, int featureCount, char*** characterTraits, int numCharacters) {
+    json_t* root = json_object();
+    if (!root) {
+        fprintf(stderr, "Failed to create JSON root object.\n");
+        return false;
+    }
+
+    json_object_set_new(root, "theme", json_string(theme));
+
+    json_t* features_array = json_array();
+    if (!features_array) {
+        fprintf(stderr, "Failed to create JSON features array.\n");
+        json_decref(root);
+        return false;
+    }
+    for (int i = 0; i < featureCount; ++i) {
+        json_array_append_new(features_array, json_string(features[i]));
+    }
+    json_object_set_new(root, "features", features_array);
+
+    json_t* characters_array = json_array();
+    if (!characters_array) {
+        fprintf(stderr, "Failed to create JSON characters array.\n");
+        json_decref(root);
+        return false;
+    }
+    for (int i = 0; i < numCharacters; ++i) {
+        json_t* character_obj = json_object();
+        json_object_set_new(character_obj, "id", json_integer(i + 1));
+
+        json_t* traits_array = json_array();
+        for (int j = 0; j < 2; ++j) { // Assuming 2 traits per character
+            json_array_append_new(traits_array, json_string(characterTraits[i][j]));
+        }
+        json_object_set_new(character_obj, "traits", traits_array);
+
+        // Reconstruct the prompt for saving, as it's not stored directly in characterTraits
+        char* prompt;
+        if (asprintf(&prompt, "A character that is a %s, %s, %s. Cartoon style.", theme, characterTraits[i][0], characterTraits[i][1]) == -1) {
+            fprintf(stderr, "Failed to reconstruct prompt for character %d for saving.\n", i + 1);
+            json_decref(character_obj);
+            json_decref(characters_array);
+            json_decref(root);
+            return false;
+        }
+        json_object_set_new(character_obj, "prompt", json_string(prompt));
+        free(prompt); // Free the temporary prompt string
+
+        json_array_append_new(characters_array, character_obj);
+    }
+    json_object_set_new(root, "characters", characters_array);
+
+    int result = json_dump_file(root, filename, JSON_INDENT(4) | JSON_PRESERVE_ORDER);
+    json_decref(root);
+
+    if (result != 0) {
+        fprintf(stderr, "Failed to save game data to %s.\n", filename);
+        return false;
+    }
+    printf("Game data saved to %s\n", filename);
+    return true;
+}
+
+// Function to load game data from a JSON file
+// This function will populate the global selectedTheme, characterFeatures, featureCount, and characterTraits
+// It assumes NUM_CHARACTERS is a global constant.
+bool load_game_data(const char* filename, char** loadedTheme, char*** loadedFeatures, int* loadedFeatureCount, char**** loadedCharacterTraits) {
+    json_error_t error;
+    json_t* root = json_load_file(filename, 0, &error);
+    if (!root) {
+        fprintf(stderr, "Error loading game data from %s: %s (line %d, col %d)\n", filename, error.text, error.line, error.column);
+        return false;
+    }
+
+    json_t* theme_json = json_object_get(root, "theme");
+    if (!json_is_string(theme_json)) {
+        fprintf(stderr, "Invalid or missing 'theme' in game data.\n");
+        json_decref(root);
+        return false;
+    }
+    *loadedTheme = strdup(json_string_value(theme_json));
+
+    json_t* features_array = json_object_get(root, "features");
+    if (!json_is_array(features_array)) {
+        fprintf(stderr, "Invalid or missing 'features' array in game data.\n");
+        free(*loadedTheme);
+        json_decref(root);
+        return false;
+    }
+    *loadedFeatureCount = json_array_size(features_array);
+    *loadedFeatures = (char**)malloc(*loadedFeatureCount * sizeof(char*));
+    if (!*loadedFeatures) {
+        fprintf(stderr, "Failed to allocate memory for features.\n");
+        free(*loadedTheme);
+        json_decref(root);
+        return false;
+    }
+    for (int i = 0; i < *loadedFeatureCount; ++i) {
+        json_t* feature_json = json_array_get(features_array, i);
+        if (!json_is_string(feature_json)) {
+            fprintf(stderr, "Invalid feature entry in game data.\n");
+            // Clean up already allocated features
+            for (int j = 0; j < i; ++j) free((*loadedFeatures)[j]);
+            free(*loadedFeatures);
+            free(*loadedTheme);
+            json_decref(root);
+            return false;
+        }
+        (*loadedFeatures)[i] = strdup(json_string_value(feature_json));
+    }
+
+    json_t* characters_array = json_object_get(root, "characters");
+    if (!json_is_array(characters_array)) {
+        fprintf(stderr, "Invalid or missing 'characters' array in game data.\n");
+        // Clean up features
+        for (int i = 0; i < *loadedFeatureCount; ++i) free((*loadedFeatures)[i]);
+        free(*loadedFeatures);
+        free(*loadedTheme);
+        json_decref(root);
+        return false;
+    }
+    int actualNumCharacters = json_array_size(characters_array);
+    if (actualNumCharacters != NUM_CHARACTERS) { // Validate against global constant
+        fprintf(stderr, "Mismatch in character count. Expected %d, got %d. Aborting load.\n", NUM_CHARACTERS, actualNumCharacters);
+        // Clean up features
+        for (int i = 0; i < *loadedFeatureCount; ++i) free((*loadedFeatures)[i]);
+        free(*loadedFeatures);
+        free(*loadedTheme);
+        json_decref(root);
+        return false;
+    }
+
+    *loadedCharacterTraits = (char***)malloc(NUM_CHARACTERS * sizeof(char**));
+    if (!*loadedCharacterTraits) {
+        fprintf(stderr, "Failed to allocate memory for character traits.\n");
+        // Clean up features
+        for (int i = 0; i < *loadedFeatureCount; ++i) free((*loadedFeatures)[i]);
+        free(*loadedFeatures);
+        free(*loadedTheme);
+        json_decref(root);
+        return false;
+    }
+
+    for (int i = 0; i < NUM_CHARACTERS; ++i) { // Loop using global constant
+        json_t* character_obj = json_array_get(characters_array, i);
+        if (!json_is_object(character_obj)) {
+            fprintf(stderr, "Invalid character object in game data.\n");
+            // Clean up already allocated traits and features
+            for (int j = 0; j < i; ++j) {
+                if ((*loadedCharacterTraits)[j]) {
+                    for (int k = 0; k < 2; ++k) free((*loadedCharacterTraits)[j][k]);
+                    free((*loadedCharacterTraits)[j]);
+                }
+            }
+            free(*loadedCharacterTraits);
+            for (int j = 0; j < *loadedFeatureCount; ++j) free((*loadedFeatures)[j]);
+            free(*loadedFeatures);
+            free(*loadedTheme);
+            json_decref(root);
+            return false;
+        }
+
+        json_t* traits_array = json_object_get(character_obj, "traits");
+        if (!json_is_array(traits_array) || json_array_size(traits_array) != 2) {
+            fprintf(stderr, "Invalid or missing 'traits' array for character %d.\n", i + 1);
+            // Clean up
+            for (int k = 0; k < i; ++k) { // Free previously allocated character traits
+                if ((*loadedCharacterTraits)[k]) {
+                    for (int l = 0; l < 2; ++l) free((*loadedCharacterTraits)[k][l]);
+                    free((*loadedCharacterTraits)[k]);
+                }
+            }
+            free(*loadedCharacterTraits);
+            for (int j = 0; j < *loadedFeatureCount; ++j) free((*loadedFeatures)[j]);
+            free(*loadedFeatures);
+            free(*loadedTheme);
+            json_decref(root);
+            return false;
+        }
+
+        (*loadedCharacterTraits)[i] = (char**)malloc(2 * sizeof(char*));
+        if (!(*loadedCharacterTraits)[i]) {
+            fprintf(stderr, "Failed to allocate memory for character %d traits.\n", i + 1);
+            // Clean up
+            for (int k = 0; k < i; ++k) { // Free previously allocated character traits
+                if ((*loadedCharacterTraits)[k]) {
+                    for (int l = 0; l < 2; ++l) free((*loadedCharacterTraits)[k][l]);
+                    free((*loadedCharacterTraits)[k]);
+                }
+            }
+            free(*loadedCharacterTraits);
+            for (int j = 0; j < *loadedFeatureCount; ++j) free((*loadedFeatures)[j]);
+            free(*loadedFeatures);
+            free(*loadedTheme);
+            json_decref(root);
+            return false;
+        }
+
+        for (int j = 0; j < 2; ++j) {
+            json_t* trait_json = json_array_get(traits_array, j);
+            if (!json_is_string(trait_json)) {
+                fprintf(stderr, "Invalid trait entry for character %d, trait %d.\n", i + 1, j + 1);
+                // Clean up
+                for (int k = 0; k < j; ++k) free((*loadedCharacterTraits)[i][k]);
+                free((*loadedCharacterTraits)[i]);
+                for (int l = 0; l < i; ++l) {
+                    if ((*loadedCharacterTraits)[l]) {
+                        for (int m = 0; m < 2; ++m) free((*loadedCharacterTraits)[l][m]);
+                        free((*loadedCharacterTraits)[l]);
+                    }
+                }
+                free(*loadedCharacterTraits);
+                for (int l = 0; l < *loadedFeatureCount; ++l) free((*loadedFeatures)[l]);
+                free(*loadedFeatures);
+                free(*loadedTheme);
+                json_decref(root);
+                return false;
+            }
+            (*loadedCharacterTraits)[i][j] = strdup(json_string_value(trait_json));
+        }
+    }
+
+    json_decref(root);
+    printf("Game data loaded from %s\n", filename);
+    return true;
+}
+
+// --- End New Helper Functions ---
 
 // Adapted generate_image function for character generation
-int generate_character_image(const char* prompt, int character_number) {
+// MODIFIED: Added image_dir parameter
+int generate_character_image(const char* prompt, int character_number, const char* image_dir) {
     char render_url[256];
     snprintf(render_url, sizeof(render_url), "http://%s/render", server_url);
     char* data = malloc(4096);
@@ -303,6 +760,7 @@ int generate_character_image(const char* prompt, int character_number) {
         fprintf(stderr, "Failed to allocate memory for data.\n");
         return 1;
     }
+    // MODIFIED: Updated save_to_disk_path to use image_dir and removed extra username argument
     int snprintf_result = snprintf(data, 4096,
                                   "{"
                                   "\"prompt\": \"%s\", "
@@ -330,14 +788,14 @@ int generate_character_image(const char* prompt, int character_number) {
                                   "\"original_prompt\": \"%s\", "
                                   "\"active_tags\": [], "
                                   "\"inactive_tags\": [], "
-                                  "\"save_to_disk_path\": \"/home/%s/Pictures/stable-diffusion/output/\", "
+                                  "\"save_to_disk_path\": \"%s/\", " // Use image_dir here
                                   "\"use_lora_model\": [], "
                                   "\"lora_alpha\": [], "
                                   "\"enable_vae_tiling\": false, "
                                   "\"scheduler_name\": \"automatic\", "
                                   "\"session_id\": \"1337\""
                                   "} ",
-                                  prompt, get_random_seed(), prompt, username);
+                                  prompt, get_random_seed(), prompt, image_dir); // Removed username argument
     if (snprintf_result < 0 || snprintf_result >= 4096) {
         fprintf(stderr, "Error creating data string (truncation detected) %d.\n", snprintf_result);
         free(data);
@@ -412,117 +870,55 @@ int generate_character_image(const char* prompt, int character_number) {
     snprintf(image_url, sizeof(image_url), "http://%s/image/stream/%s", server_url, task);
     snprintf(ping_url, sizeof(ping_url), "http://%s/ping?session_id=1337", server_url);
 
-    char* status = strdup("pending");
+    char* server_status = strdup("unknown"); // Initialize server status
+    int ret_val = 0; // Default to success
 
-    while (strcmp(status, "completed") != 0) {
-        if (strcmp(status, "error") == 0) {
-            fprintf(stderr, "Error occurred during rendering.\n");
-            if (task_str) free(task_str);
-            return 1;
-        }
+    while (strcmp(server_status, "Online") != 0 && !WindowShouldClose()) {
+        sleep(5); // Increased sleep duration to 2 seconds
 
-        if (strcmp(status, "Online") == 0) {
-            printf("Status is Online, generation complete.\n");
-            break;
-        }
-
-        sleep(5);
-
-        // Get the status
+        // --- Get status from ping_url ---
         char* ping_response = make_http_get(ping_url);
         if (!ping_response) {
-            fprintf(stderr, "Failed to get ping response from server.\n");
-            if (task_str) free(task_str);
-            free(status);
-            return 1;
-        }
-
-        // Debug: Print the raw ping response
-        //printf("Raw Ping Response: %s\n", ping_response);
-
-        // Extract the status string
-        char* status_start = strstr(ping_response, "\"status\":\"");
-        if (status_start != NULL) {
-            status_start += strlen("\"status\":\"");
-            char* status_end = strchr(status_start, '"');
-            if (status_end != NULL) {
-                // Calculate the length of the status string
-                size_t status_len = status_end - status_start;
-
-                // Allocate memory for the status string
-                char* extracted_status = (char*)malloc(status_len + 1);
-                if (extracted_status == NULL) {
-                    fprintf(stderr, "Failed to allocate memory for status.\n");
-                    free(ping_response);
-                    if (task_str) free(task_str);
-                    free(status);
-                    return 1;
-                }
-
-                // Copy the status string
-                strncpy(extracted_status, status_start, status_len);
-                extracted_status[status_len] = '\0';
-
-                // Use the extracted status
-                free(status);
-                status = extracted_status;
-                printf("Extracted Status: %s\n", status);
-            } else {
-                printf("Could not find end quote for status.\n");
-            }
+            fprintf(stderr, "Failed to get ping response from server (ping_url: %s).\n", ping_url);
+            // Continue loop, maybe stream data will provide progress or it will eventually finish
         } else {
-            printf("Could not find status field in ping response.\n");
+            json_error_t error;
+            json_t* root_ping = json_loads(ping_response, 0, &error);
+            if (!root_ping) {
+                fprintf(stderr, "Error parsing ping JSON: %s\n", error.text);
+            } else {
+                json_t* status_json = json_object_get(root_ping, "status");
+                if (status_json && json_is_string(status_json)) {
+                    free(server_status); // Free previous status string
+                    server_status = strdup(json_string_value(status_json));
+                    printf("Server Status: %s\n", server_status);
+                } else {
+                    fprintf(stderr, "Status field not found or not a string in ping response. Assuming still generating.\n");
+                }
+                json_decref(root_ping);
+            }
+            free(ping_response);
         }
-        free(ping_response);
 
-        // Get the stream data
+        // --- Get stream data from image_url for percentage updates ---
         char* stream_response = make_http_get(image_url);
         if (!stream_response) {
-            fprintf(stderr, "Failed to get stream response from server.\n");
-            if (task_str) free(task_str);
-            free(status);
-            return 1;
+            fprintf(stderr, "Failed to get stream response from server (image_url: %s).\n", image_url);
+            // Continue loop, maybe ping will eventually tell us it's done
+        } else {
+            // Process the stream response using the new robust parser
+            process_json_stream_response(stream_response);
+            free(stream_response); // Free the original response
         }
 
-        // Split the stream response into individual JSON objects
-        char* stream_data_str = strtok(stream_response, "}{");
-        while (stream_data_str != NULL) {
-            // Add back the missing brackets
-            char json_string[2048];
-            snprintf(json_string, sizeof(json_string), "%s%s%s",
-                     stream_data_str[0] == '{' ? "" : "{",
-                     stream_data_str,
-                     stream_data_str[strlen(stream_data_str) - 1] == '}' ? "" : "}");
+        printf("Task: %s, Prompt: %s, Percent Done: %s\n", task, prompt, current_percent);
+    }
 
-            // Process the stream data as a single JSON object
-            json_error_t stream_error;
-            json_t* stream_data = json_loads(json_string, 0, &stream_error);
-            if (!stream_data) {
-                stream_data_str = strtok(NULL, "}{");
-                continue;
-            }
-
-            json_t* steps_json = json_object_get(stream_data, "step");
-            json_t* total_steps_json = json_object_get(stream_data, "total_steps");
-
-            if (steps_json && total_steps_json && json_is_number(steps_json) && json_is_number(total_steps_json)) {
-                int steps = json_integer_value(steps_json);
-                int total_steps = json_integer_value(total_steps_json);
-                if (total_steps > 0) { // Prevent division by zero
-                    float percentage = (float)steps / total_steps * 100;
-                    pthread_mutex_lock(&mutex);
-                    snprintf(current_percent, sizeof(current_percent), "%.0f%%", percentage);
-                    pthread_mutex_unlock(&mutex);
-                }
-            }
-
-            json_decref(stream_data);
-            stream_data_str = strtok(NULL, "}{");
-        }
-        free(stream_response);
-
-        printf("Task Status: %s, Task: %s, Prompt: %s, Percent Done: %s\n",
-               status, task, prompt, current_percent);
+    // If we broke out of the loop due to an error (e.g., memory allocation failure), return early
+    if (ret_val != 0) {
+        if (task_str) free(task_str);
+        free(server_status);
+        return ret_val;
     }
 
     // Get the final image
@@ -530,7 +926,7 @@ int generate_character_image(const char* prompt, int character_number) {
     if (!final_stream_response) {
         fprintf(stderr, "Failed to get final stream response from server.\n");
         if (task_str) free(task_str);
-        free(status);
+        free(server_status);
         return 1;
     }
 
@@ -539,7 +935,8 @@ int generate_character_image(const char* prompt, int character_number) {
     if (!data_start) {
         fprintf(stderr, "Image data not found in JSON response.\n");
         free(final_stream_response);
-	if (task_str) free(task_str);
+        if (task_str) free(task_str);
+        free(server_status);
         return 1;
     }
 
@@ -551,7 +948,8 @@ int generate_character_image(const char* prompt, int character_number) {
     if (!data_end) {
         fprintf(stderr, "End of image data not found in JSON response.\n");
         free(final_stream_response);
-	if (task_str) free(task_str);
+        if (task_str) free(task_str);
+        free(server_status);
         return 1;
     }
 
@@ -563,7 +961,8 @@ int generate_character_image(const char* prompt, int character_number) {
     if (!image_data_base64) {
         fprintf(stderr, "Failed to allocate memory for base64 data.\n");
         free(final_stream_response);
-	if (task_str) free(task_str);
+        if (task_str) free(task_str);
+        free(server_status);
         return 1;
     }
 
@@ -580,7 +979,8 @@ int generate_character_image(const char* prompt, int character_number) {
     if (!decoded_data) {
         fprintf(stderr, "Base64 decoding failed.\n");
         free(image_data_base64);
-	if (task_str) free(task_str);
+        if (task_str) free(task_str);
+        free(server_status);
         return 1;
     }
 
@@ -588,20 +988,20 @@ int generate_character_image(const char* prompt, int character_number) {
     free(image_data_base64);
 
     // Save the decoded image data to a file
-    char filename[64];
-    snprintf(filename, sizeof(filename), "character_%d.png", character_number);
+    char filename[MAX_FILEPATH_BUFFER_SIZE]; // Use MAX_FILEPATH_BUFFER_SIZE
+    snprintf(filename, sizeof(filename), "%s/character_%d.png", image_dir, character_number); // Use image_dir here
     FILE* fp = fopen(filename, "wb");
     if (fp) {
-        fwrite(decoded_data, 1, decoded_size, fp);
+        fwrite(decoded_data, 1, decoded_size, fp); // Corrected fwrite arguments
         fclose(fp);
         printf("Image saved to %s\n", filename);
     } else {
-        fprintf(stderr, "Failed to save image to file.\n");
+        fprintf(stderr, "Failed to save image to file %s: %s\n", filename, strerror(errno));
     }
 
     free(decoded_data);
     if (task_str) free(task_str);
-    free(status);
+    free(server_status); // Free server status
     return 0;
 }
 
@@ -609,12 +1009,14 @@ int generate_character_image(const char* prompt, int character_number) {
 typedef struct {
     char* prompt;
     int character_number;
+    // const char* image_dir; // Removed from here, now part of BatchImageGenData
 } SingleImageGenData;
 
 // Struct to hold data for batch image generation
 typedef struct {
     SingleImageGenData* images_data; // Array of prompts and character numbers
     int num_images;
+    const char* image_dir; // MODIFIED: Added image_dir to struct
 } BatchImageGenData;
 
 // Function to run image generation in a separate thread
@@ -632,11 +1034,12 @@ void* generateImageThread(void* arg) {
         characters_generated_count = i + 1; // Update count for display
         snprintf(generation_status_message, sizeof(generation_status_message),
                  "Generating image %d of %d...", characters_generated_count, total_characters_to_generate);
-        current_percent[0] = '\0'; // Clear percentage
+        snprintf(current_percent, sizeof(current_percent), "0%%"); // Initialize percentage for new image
         pthread_mutex_unlock(&mutex);
 
         SingleImageGenData* current_image_data = &batch_data->images_data[i];
-        generate_character_image(current_image_data->prompt, current_image_data->character_number);
+        // MODIFIED: Pass image_dir from batch_data to generate_character_image
+        generate_character_image(current_image_data->prompt, current_image_data->character_number, batch_data->image_dir);
 
         // Free prompt after use
         free(current_image_data->prompt);
@@ -677,6 +1080,7 @@ char** getThemesFromLLM(int* themeCount) {
         json_t* choices = json_object_get(root, "choices");
         if (!json_is_array(choices) || json_array_size(choices) == 0) {
             fprintf(stderr, "Error: 'choices' is not a non-empty array.\n");
+            fprintf(stderr, "Raw LLM Response: %s\n", llmResponse); // Print the raw response for debugging
             json_decref(root);
             free(llmResponse);
             return NULL;
@@ -920,8 +1324,8 @@ void setYesNoInput(const char* question) {
 }
 
 // Function for the LLM to make a guessing round
-// MODIFIED: Added playerTexture parameter
-void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* theme, int numCharacters, int* charactersRemaining, int* remainingCount, Texture2D playerTexture) {
+// MODIFIED: Added playerCharacter parameter
+void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* theme, int numCharacters, int* charactersRemaining, int* remainingCount, Texture2D playerTexture, int playerCharacter) {
     printf("LLM is thinking...\n");
 
     // Construct the prompt for the LLM to formulate a question
@@ -1062,7 +1466,7 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             // Draw the player's character image
             if (playerTexture.id != 0) {
                 // MODIFIED: Draw at (195.2, 170) scaled to 0.8
-                DrawTextureEx(playerTexture, (Vector2){195.2f, 170.0f}, 0.8f, 0.8f, WHITE); 
+                DrawTextureEx(playerTexture, (Vector2){195.2f, 170.0f}, 0.8f, 0.8f, WHITE);
             }
 
             // Draw the question
@@ -1119,8 +1523,6 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             return;
         }
         if (eliminationInstruction) free(eliminationInstruction); // Free the instruction string
-
-        free(characterList); // Free characterList after it's used in eliminationPrompt
 
         printf("Elimination Prompt sent to LLM:\n%s\n", eliminationPrompt);
 
@@ -1205,6 +1607,16 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
                 }
                 int characterToEliminate = json_integer_value(charIndex) - 1; // Subtract 1 to get 0-based index
 
+                // Check if the character to eliminate is the player's character
+                if (characterToEliminate == playerCharacter) {
+                    pthread_mutex_lock(&mutex);
+                    currentGameState = GAME_STATE_PLAYER_WINS;
+                    pthread_mutex_unlock(&mutex);
+                    printf("LLM eliminated player's character! Player wins!\n");
+                    // No need to continue processing eliminations if player wins
+                    break;
+                }
+
                 // Find the character in the remaining characters array and remove it
                 int found = 0;
                 for (int j = 0; j < *remainingCount; j++) {
@@ -1250,180 +1662,231 @@ void clearScreen() {
     EndDrawing();
 }
 
-int main() {
-    // Seed the random number generator
-    srand(time(NULL));
+// Function to draw the image generation progress screen
+void DrawImageGenerationProgressScreen(void) {
+    BeginDrawing();
+    ClearBackground(RAYWHITE);
+    pthread_mutex_lock(&mutex);
+    DrawText(generation_status_message, 10, 10, 20, BLACK);
+    DrawText(current_percent, 10, 40, 20, BLACK);
+    pthread_mutex_unlock(&mutex);
+    EndDrawing();
+}
 
-    // Initialize Raylib window
-    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Guess Llama");
-    SetTargetFPS(60);
+// Struct to pass arguments to gameSetupThread
+typedef struct {
+    char theme_input[100];
+    bool llm_selected;
+} SetupThreadArgs;
 
-    // Initialize mutex
-    if (pthread_mutex_init(&mutex, NULL) != 0) {
-        fprintf(stderr, "Mutex initialization failed.\n");
-        return 1;
-    }
+// Function to run initial game setup in a separate thread
+void* gameSetupThread(void* arg) {
+    SetupThreadArgs* args = (SetupThreadArgs*)arg;
 
-    // Theme input variables
-    char theme[100] = {0};
-    bool themeEntered = false;
-    Rectangle themeInputBox = {100, 100, 200, 30};
-    bool themeInputSelected = false;
-    Rectangle llmThemeButton = {320, 100, 200, 30};
-    bool llmThemeSelected = false;
+    pthread_mutex_lock(&mutex);
+    setup_in_progress = true;
+    snprintf(generation_status_message, sizeof(generation_status_message), "Preparing game data...");
+    pthread_mutex_unlock(&mutex);
 
-    // Main game loop for theme selection
-    while (!WindowShouldClose() && !themeEntered && !llmThemeSelected) {
-        // Handle input
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            if (CheckCollisionPointRec(GetMousePosition(), themeInputBox)) {
-                themeInputSelected = true;
-            } else {
-                themeInputSelected = false;
-            }
-        }
-
-        int key = GetCharPressed();
-        while (key > 0) {
-            if (themeInputSelected) {
-                int len = strlen(theme);
-                if (key >= 32 && key <= 125 && len < 99) {
-                    theme[len] = (char)key;
-                    theme[len + 1] = '\0';
-                }
-            }
-            key = GetCharPressed();  // Check next character in the queue
-        }
-
-        if (IsKeyPressed(KEY_BACKSPACE) && themeInputSelected) {
-            int len = strlen(theme);
-            if (len > 0) {
-                theme[len - 1] = '\0';
-            }
-        }
-
-        if (IsKeyPressed(KEY_ENTER) && themeInputSelected) {
-            themeEntered = true;
-        }
-
-        // Check for LLM theme selection
-        if (CheckCollisionPointRec(GetMousePosition(), llmThemeButton) && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-            llmThemeSelected = true;
-        }
-
-        // Drawing
-        BeginDrawing();
-        ClearBackground(RAYWHITE);
-
-        DrawText("Enter a theme:", 100, 70, 20, GRAY);
-        DrawRectangleRec(themeInputBox, LIGHTGRAY);
-        DrawText(theme, themeInputBox.x + 5, themeInputBox.y + 8, 20, BLACK);
-        if (themeInputSelected) {
-            DrawRectangleLines(themeInputBox.x, themeInputBox.y, themeInputBox.width, themeInputBox.height, BLUE);
-        }
-
-        // LLM Theme Button
-        DrawRectangleRec(llmThemeButton, ORANGE);
-        DrawText("LLM Random Theme", llmThemeButton.x + 5, llmThemeButton.y + 8, 20, BLACK);
-
-        // Removed: "Press SPACE to continue" text
-        // if (themeEntered) {
-        //     DrawText("Press SPACE to continue", 100, 150, 20, GRAY);
-        // }
-
-        EndDrawing();
-
-        if (themeEntered && IsKeyPressed(KEY_SPACE)) {
-            break; // Exit the theme input loop
-        }
-    }
-
-    // Clear the screen before starting the game logic
-    clearScreen();
-
-    // Game logic starts here after theme is entered
-    char* selectedTheme;
-    if (llmThemeSelected) {
-        // Get a random theme from the LLM
+    if (args->llm_selected) {
         int themeCount;
         char** themes = getThemesFromLLM(&themeCount);
         if (themes != NULL && themeCount > 0) {
-            // Select a random theme from the list
             int randomIndex = rand() % themeCount;
             selectedTheme = strdup(themes[randomIndex]);
             printf("LLM selected theme: %s\n", selectedTheme);
-
-            // Free the memory allocated for the themes
             for (int i = 0; i < themeCount; i++) {
                 free(themes[i]);
             }
             free(themes);
         } else {
-            // If no themes are returned, use a default theme
             selectedTheme = strdup("Default");
             printf("Using default theme: Default\n");
         }
     } else {
-        selectedTheme = strdup(theme);
+        selectedTheme = strdup(args->theme_input);
         printf("Using theme: %s\n", selectedTheme);
     }
 
-    // Get character features based on the theme
-    int featureCount;
-    char** characterFeatures = getCharacterFeatures(selectedTheme, &featureCount);
+    // MODIFIED: Format theme name and check/create directory
+    char* temp_formatted_name = format_theme_name(selectedTheme);
+    strncpy(formattedThemeName, temp_formatted_name, sizeof(formattedThemeName) - 1);
+    formattedThemeName[sizeof(formattedThemeName) - 1] = '\0';
+    free(temp_formatted_name); // Free the dynamically allocated string
 
-    if (characterFeatures != NULL && featureCount > 0) {
-        printf("Character features:\n");
-        for (int i = 0; i < featureCount; i++) {
-            printf("- %s\n", characterFeatures[i]);
+    // Use a temporary buffer to construct the path, then copy to global
+    char temp_image_dir_path[512]; // Sufficient for "images/" + 255 chars + null
+    snprintf(temp_image_dir_path, sizeof(temp_image_dir_path), "images/%s", formattedThemeName);
+    strncpy(imageDirectoryPath, temp_image_dir_path, sizeof(imageDirectoryPath) - 1);
+    imageDirectoryPath[sizeof(imageDirectoryPath) - 1] = '\0'; // Ensure null termination
+
+    // Construct the path for game_data.json
+    char gameDataFilePath[MAX_FILEPATH_BUFFER_SIZE];
+    snprintf(gameDataFilePath, sizeof(gameDataFilePath), "%s/game_data.json", imageDirectoryPath);
+
+    if (directory_exists(imageDirectoryPath)) {
+        pthread_mutex_lock(&mutex);
+        confirm_regen_prompt_active = true;
+        regen_choice = -1; // Reset choice
+        pthread_mutex_unlock(&mutex);
+
+        // Wait for user input from main thread
+        pthread_mutex_lock(&mutex);
+        while (confirm_regen_prompt_active && !WindowShouldClose()) { // Wait until main thread processes the prompt
+            pthread_cond_wait(&regen_cond, &mutex);
+        }
+        pthread_mutex_unlock(&mutex);
+
+        if (WindowShouldClose()) { // If window closed while waiting
+            pthread_mutex_lock(&mutex);
+            currentGameState = GAME_STATE_EXIT;
+            setup_in_progress = false;
+            pthread_mutex_unlock(&mutex);
+            free(args);
+            return NULL;
         }
 
-        // Assign 2-3 random features to each of the 24 characters
-        int numCharacters = 24;
+        if (regen_choice == 1) { // User chose Yes to re-create
+            pthread_mutex_lock(&mutex);
+            snprintf(generation_status_message, sizeof(generation_status_message), "Deleting old images...");
+            pthread_mutex_unlock(&mutex);
+            if (delete_files_in_directory(imageDirectoryPath) != 0) {
+                fprintf(stderr, "Failed to delete old images in %s.\n", imageDirectoryPath);
+                pthread_mutex_lock(&mutex);
+                currentGameState = GAME_STATE_EXIT;
+                setup_in_progress = false;
+                pthread_mutex_unlock(&mutex);
+                free(args);
+                return NULL;
+            }
+            // Proceed to create directory and generate images (fall through to common generation path)
+        } else { // User chose No, skip image generation
+            pthread_mutex_lock(&mutex);
+            snprintf(generation_status_message, sizeof(generation_status_message), "Skipping image generation. Loading existing game data...");
+            pthread_mutex_unlock(&mutex);
 
-        // Allocate memory for character traits
-        char*** characterTraits = (char***)malloc(numCharacters * sizeof(char**));
-        if (characterTraits == NULL) {
-            fprintf(stderr, "Memory allocation failed\n");
-            // Cleanup before returning
-            for (int i = 0; i < featureCount; i++) free(characterFeatures[i]);
-            free(characterFeatures);
-            free(selectedTheme);
-            CloseWindow();
-            pthread_mutex_destroy(&mutex);
-            return 1;
-        }
-
-        for (int i = 0; i < numCharacters; ++i) {
-            int numCharFeatures = 2; // Each character has 2 features
-            characterTraits[i] = (char**)malloc(numCharFeatures * sizeof(char*));
-
-            if (characterTraits[i] == NULL) {
-                fprintf(stderr, "Memory allocation failed\n");
-                // Cleanup before returning
-                for (int j = 0; j < i; ++j) { // Free already allocated characterTraits[j]
-                    for (int k = 0; k < 2; ++k) free(characterTraits[j][k]);
-                    free(characterTraits[j]);
-                }
-                free(characterTraits);
-                for (int j = 0; j < featureCount; j++) free(characterFeatures[j]);
-                free(characterFeatures);
-                free(selectedTheme);
-                CloseWindow();
-                pthread_mutex_destroy(&mutex);
-                return 1;
+            // Attempt to load game data
+            if (!load_game_data(gameDataFilePath, &selectedTheme, &characterFeatures, &featureCount, &characterTraits)) {
+                fprintf(stderr, "Failed to load existing game data. Cannot proceed without re-generating images. Exiting.\n");
+                pthread_mutex_lock(&mutex);
+                currentGameState = GAME_STATE_EXIT; // Critical error, exit game
+                setup_in_progress = false;
+                pthread_mutex_unlock(&mutex);
+                free(args);
+                return NULL;
             }
 
+            // Assign random character to player
+            playerCharacter = rand() % NUM_CHARACTERS; // Use the global NUM_CHARACTERS constant
+            printf("\nYou are character number %d\n", playerCharacter + 1);
+
+            // Construct the player character string
+            pthread_mutex_lock(&mutex);
+            snprintf(playerCharacterString, sizeof(playerCharacterString), "Character %d: %s, %s",
+                     playerCharacter + 1, characterTraits[playerCharacter][0], characterTraits[playerCharacter][1]);
+            snprintf(characterSelectionText, sizeof(characterSelectionText), "You are character number %d", playerCharacter + 1);
+            pthread_mutex_unlock(&mutex);
+
+
+            // Assign random character to LLM, making sure it's different from the player's
+            do {
+                llmCharacter = rand() % NUM_CHARACTERS;
+            } while (llmCharacter == playerCharacter);
+
+            // Initialize the array of remaining characters
+            charactersRemaining = (int*)malloc(NUM_CHARACTERS * sizeof(int));
+            if (charactersRemaining == NULL) {
+                fprintf(stderr, "Memory allocation failed\n");
+                pthread_mutex_lock(&mutex);
+                currentGameState = GAME_STATE_EXIT;
+                pthread_mutex_unlock(&mutex);
+                pthread_mutex_lock(&mutex);
+                setup_in_progress = false;
+                pthread_mutex_unlock(&mutex);
+                free(args);
+                return NULL;
+            }
+            remainingCount = NUM_CHARACTERS;
+            for (int i = 0; i < NUM_CHARACTERS; i++) {
+                charactersRemaining[i] = i;
+            }
+
+            pthread_mutex_lock(&mutex);
+            setup_in_progress = false; // Indicate setup is complete
+            // currentGameState = GAME_STATE_PLAYING; // REMOVED: Main thread will handle state transition
+            pthread_mutex_unlock(&mutex);
+            free(args);
+            return NULL; // Exit this thread early
+        }
+    }
+
+    // If directory didn't exist or user chose to re-create, ensure it's created
+    pthread_mutex_lock(&mutex);
+    snprintf(generation_status_message, sizeof(generation_status_message), "Creating image directory...");
+    pthread_mutex_unlock(&mutex);
+    if (create_directory_recursive(imageDirectoryPath) != 0) {
+        fprintf(stderr, "Failed to create image directory %s.\n", imageDirectoryPath);
+        pthread_mutex_lock(&mutex);
+        currentGameState = GAME_STATE_EXIT;
+        setup_in_progress = false;
+        pthread_mutex_unlock(&mutex);
+        free(args);
+        return NULL;
+    }
+
+    free(args); // Free the arguments struct (only if we didn't return early)
+
+    pthread_mutex_lock(&mutex);
+    snprintf(generation_status_message, sizeof(generation_status_message), "Getting character features...");
+    pthread_mutex_unlock(&mutex);
+
+    characterFeatures = getCharacterFeatures(selectedTheme, &featureCount);
+
+    if (characterFeatures != NULL && featureCount > 0) {
+        characterTraits = (char***)malloc(NUM_CHARACTERS * sizeof(char**));
+        if (characterTraits == NULL) {
+            fprintf(stderr, "Memory allocation failed\n");
+            pthread_mutex_lock(&mutex);
+            currentGameState = GAME_STATE_EXIT;
+            pthread_mutex_unlock(&mutex);
+            pthread_mutex_lock(&mutex);
+            setup_in_progress = false;
+            pthread_mutex_unlock(&mutex);
+            return NULL;
+        }
+
+        for (int i = 0; i < NUM_CHARACTERS; ++i) {
+            int numCharFeatures = 2;
+            characterTraits[i] = (char**)malloc(numCharFeatures * sizeof(char*));
+            if (characterTraits[i] == NULL) {
+                fprintf(stderr, "Memory allocation failed\n");
+                pthread_mutex_lock(&mutex);
+                currentGameState = GAME_STATE_EXIT;
+                pthread_mutex_unlock(&mutex);
+                // Clean up already allocated characterTraits
+                for (int k = 0; k < i; ++k) {
+                    for (int l = 0; l < 2; ++l) {
+                        if (characterTraits[k][l]) free(characterTraits[k][l]);
+                    }
+                    free(characterTraits[k]);
+                }
+                free(characterTraits);
+                characterTraits = NULL;
+                pthread_mutex_lock(&mutex);
+                setup_in_progress = false;
+                pthread_mutex_unlock(&mutex);
+                return NULL;
+            }
             for (int j = 0; j < numCharFeatures; ++j) {
                 int featureIndex = rand() % featureCount;
-                characterTraits[i][j] = strdup(characterFeatures[featureIndex]); // Assign the feature to the character
+                characterTraits[i][j] = strdup(characterFeatures[featureIndex]);
             }
         }
 
         printf("\nCharacter Traits:\n");
-        for (int i = 0; i < numCharacters; ++i) {
+        for (int i = 0; i < NUM_CHARACTERS; ++i) {
             printf("Character %d: ", i + 1);
-            int numCharFeatures = 2; // Each character has 2 features
+            int numCharFeatures = 2;
             for (int j = 0; j < numCharFeatures; ++j) {
                 printf("%s", characterTraits[i][j]);
                 if (j < numCharFeatures - 1) {
@@ -1433,226 +1896,444 @@ int main() {
             printf("\n");
         }
 
-        // Prepare data for the single image generation thread
+        // Save game data AFTER characterTraits are fully populated and BEFORE image generation starts
+        if (!save_game_data(gameDataFilePath, selectedTheme, characterFeatures, featureCount, characterTraits, NUM_CHARACTERS)) {
+            fprintf(stderr, "Failed to save game data after generation setup. This game's data will not be reusable.\n");
+            // This is a non-fatal error for the current game, but means data won't be reusable.
+            // For now, let's just log it.
+        }
+
         BatchImageGenData* batch_data = (BatchImageGenData*)malloc(sizeof(BatchImageGenData));
         if (!batch_data) {
             fprintf(stderr, "Failed to allocate memory for batch image generation data.\n");
-            // Free characterTraits and characterFeatures before returning
-            for (int i = 0; i < numCharacters; ++i) {
-                for (int j = 0; j < 2; ++j) free(characterTraits[i][j]);
-                free(characterTraits[i]);
-            }
-            free(characterTraits);
-            for (int i = 0; i < featureCount; i++) free(characterFeatures[i]);
-            free(characterFeatures);
-            free(selectedTheme);
-            CloseWindow();
-            pthread_mutex_destroy(&mutex);
-            return 1;
+            pthread_mutex_lock(&mutex);
+            currentGameState = GAME_STATE_EXIT;
+            pthread_mutex_unlock(&mutex);
+            pthread_mutex_lock(&mutex);
+            setup_in_progress = false;
+            pthread_mutex_unlock(&mutex);
+            return NULL;
         }
-        batch_data->num_images = numCharacters;
-        batch_data->images_data = (SingleImageGenData*)malloc(numCharacters * sizeof(SingleImageGenData));
+        batch_data->num_images = NUM_CHARACTERS;
+        batch_data->images_data = (SingleImageGenData*)malloc(NUM_CHARACTERS * sizeof(SingleImageGenData));
         if (!batch_data->images_data) {
             fprintf(stderr, "Failed to allocate memory for images_data array.\n");
             free(batch_data);
-            // Free characterTraits and characterFeatures before returning
-            for (int i = 0; i < numCharacters; ++i) {
-                for (int j = 0; j < 2; ++j) free(characterTraits[i][j]);
-                free(characterTraits[i]);
-            }
-            free(characterTraits);
-            for (int i = 0; i < featureCount; i++) free(characterFeatures[i]);
-            free(characterFeatures);
-            free(selectedTheme);
-            CloseWindow();
-            pthread_mutex_destroy(&mutex);
-            return 1;
+            pthread_mutex_lock(&mutex);
+            currentGameState = GAME_STATE_EXIT;
+            pthread_mutex_unlock(&mutex);
+            pthread_mutex_lock(&mutex);
+            setup_in_progress = false;
+            pthread_mutex_unlock(&mutex);
+            return NULL;
         }
+        batch_data->image_dir = imageDirectoryPath; // MODIFIED: Pass image_dir to batch_data
 
-        for (int i = 0; i < numCharacters; ++i) {
+        for (int i = 0; i < NUM_CHARACTERS; ++i) {
             char* prompt;
             if (asprintf(&prompt, "A character that is a %s, %s, %s. Cartoon style.", selectedTheme, characterTraits[i][0], characterTraits[i][1]) == -1) {
                 fprintf(stderr, "Failed to construct prompt for character %d\n", i + 1);
-                // Free previously allocated prompts in batch_data->images_data
-                for (int j = 0; j < i; ++j) free(batch_data->images_data[j].prompt);
+                // Clean up already allocated prompts
+                for (int k = 0; k < i; ++k) {
+                    free(batch_data->images_data[k].prompt);
+                }
                 free(batch_data->images_data);
                 free(batch_data);
-                // Free characterTraits and characterFeatures before returning
-                for (int k = 0; k < numCharacters; ++k) {
-                    for (int l = 0; l < 2; ++l) free(characterTraits[k][l]);
-                    free(characterTraits[k]);
-                }
-                free(characterTraits);
-                for (int k = 0; k < featureCount; k++) free(characterFeatures[k]);
-                free(characterFeatures);
-                free(selectedTheme);
-                CloseWindow();
-                pthread_mutex_destroy(&mutex);
-                return 1;
+                pthread_mutex_lock(&mutex);
+                currentGameState = GAME_STATE_EXIT;
+                pthread_mutex_unlock(&mutex);
+                pthread_mutex_lock(&mutex);
+                setup_in_progress = false;
+                pthread_mutex_unlock(&mutex);
+                return NULL;
             }
             batch_data->images_data[i].prompt = prompt;
             batch_data->images_data[i].character_number = i + 1;
+            // batch_data->images_data[i].image_dir is set via batch_data->image_dir
         }
 
-        // Launch the master image generation thread
+        // Launch the image generation thread
+        pthread_mutex_lock(&mutex);
+        snprintf(generation_status_message, sizeof(generation_status_message), "Starting image generation...");
+        pthread_mutex_unlock(&mutex);
         if (pthread_create(&image_gen_master_thread, NULL, generateImageThread, (void*)batch_data) != 0) {
             fprintf(stderr, "Failed to create master image generation thread.\n");
-            // Free all prompts and batch_data
-            for (int i = 0; i < numCharacters; ++i) free(batch_data->images_data[i].prompt);
+            // Clean up batch_data and its contents if thread creation fails
+            for (int i = 0; i < batch_data->num_images; ++i) {
+                free(batch_data->images_data[i].prompt);
+            }
             free(batch_data->images_data);
             free(batch_data);
-            // Free characterTraits and characterFeatures before returning
-            for (int i = 0; i < numCharacters; ++i) {
-                for (int j = 0; j < 2; ++j) free(characterTraits[i][j]);
-                free(characterTraits[i]);
-            }
-            free(characterTraits);
-            for (int i = 0; i < featureCount; i++) free(characterFeatures[i]);
-            free(characterFeatures);
-            free(selectedTheme);
-            CloseWindow();
-            pthread_mutex_destroy(&mutex);
-            return 1;
+            pthread_mutex_lock(&mutex);
+            currentGameState = GAME_STATE_EXIT;
+            pthread_mutex_unlock(&mutex);
+            pthread_mutex_lock(&mutex);
+            setup_in_progress = false;
+            pthread_mutex_unlock(&mutex);
+            return NULL;
         }
 
         // Assign random character to player
-        int playerCharacter = rand() % numCharacters;
+        playerCharacter = rand() % NUM_CHARACTERS;
         printf("\nYou are character number %d\n", playerCharacter + 1);
 
         // Construct the player character string
+        pthread_mutex_lock(&mutex);
         snprintf(playerCharacterString, sizeof(playerCharacterString), "Character %d: %s, %s",
                  playerCharacter + 1, characterTraits[playerCharacter][0], characterTraits[playerCharacter][1]);
         snprintf(characterSelectionText, sizeof(characterSelectionText), "You are character number %d", playerCharacter + 1);
+        pthread_mutex_unlock(&mutex);
+
 
         // Assign random character to LLM, making sure it's different from the player's
-        int llmCharacter;
         do {
-            llmCharacter = rand() % numCharacters;
+            llmCharacter = rand() % NUM_CHARACTERS;
         } while (llmCharacter == playerCharacter);
 
         // Initialize the array of remaining characters
-        int* charactersRemaining = (int*)malloc(numCharacters * sizeof(int));
+        charactersRemaining = (int*)malloc(NUM_CHARACTERS * sizeof(int));
         if (charactersRemaining == NULL) {
             fprintf(stderr, "Memory allocation failed\n");
-            // Cleanup before returning
-            for (int i = 0; i < numCharacters; ++i) {
-                for (int j = 0; j < 2; ++j) free(characterTraits[i][j]);
-                free(characterTraits[i]);
-            }
-            free(characterTraits);
-            for (int i = 0; i < featureCount; i++) free(characterFeatures[i]);
-            free(characterFeatures);
-            free(selectedTheme);
-            CloseWindow();
-            pthread_mutex_destroy(&mutex);
-            return 1;
+            pthread_mutex_lock(&mutex);
+            currentGameState = GAME_STATE_EXIT;
+            pthread_mutex_unlock(&mutex);
+            pthread_mutex_lock(&mutex);
+            setup_in_progress = false;
+            pthread_mutex_unlock(&mutex);
+            return NULL;
         }
-        int remainingCount = numCharacters;
-        for (int i = 0; i < numCharacters; i++) {
+        remainingCount = NUM_CHARACTERS;
+        for (int i = 0; i < NUM_CHARACTERS; i++) {
             charactersRemaining[i] = i;
         }
+    } else {
+        printf("No character features found.\n");
+        pthread_mutex_lock(&mutex);
+        currentGameState = GAME_STATE_EXIT;
+        pthread_mutex_unlock(&mutex);
+    }
 
-        // --- Wait for image generation to complete ---
-        while (!WindowShouldClose()) {
+    pthread_mutex_lock(&mutex);
+    setup_in_progress = false; // Indicate setup is complete (image gen thread is now running independently)
+    pthread_mutex_unlock(&mutex);
+
+    return NULL;
+}
+
+
+int main() {
+    // Seed the random number generator
+    srand(time(NULL));
+
+    // Initialize Raylib window
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Guess Llama");
+    SetTargetFPS(60);
+
+    // Initialize mutex and condition variable
+    if (pthread_mutex_init(&mutex, NULL) != 0) {
+        fprintf(stderr, "Mutex initialization failed.\n");
+        return 1;
+    }
+    if (pthread_cond_init(&regen_cond, NULL) != 0) {
+        fprintf(stderr, "Condition variable initialization failed.\n");
+        pthread_mutex_destroy(&mutex);
+        return 1;
+    }
+
+    // Initialize curl globally
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+
+    // Theme input variables
+    char theme_input_buffer[100] = {0}; // Buffer for user input theme
+    bool themeInputSelected = false;
+    Rectangle themeInputBox = {100, 100, 200, 30};
+    Rectangle llmThemeButton = {320, 100, 200, 30};
+    bool llmThemeSelected = false; // Flag to indicate if LLM theme was chosen
+
+    // Main game loop
+    while (!WindowShouldClose() && currentGameState != GAME_STATE_EXIT) {
+        pthread_mutex_lock(&mutex);
+        GameState state = currentGameState;
+        bool current_confirm_regen_prompt_active = confirm_regen_prompt_active;
+        pthread_mutex_unlock(&mutex);
+
+        // Handle state transitions for image regeneration prompt
+        if (state == GAME_STATE_IMAGE_GENERATION && current_confirm_regen_prompt_active) {
             pthread_mutex_lock(&mutex);
-            bool current_generating_status = generating_images;
+            currentGameState = GAME_STATE_CONFIRM_REGENERATE_IMAGES;
             pthread_mutex_unlock(&mutex);
+            state = GAME_STATE_CONFIRM_REGENERATE_IMAGES; // Update local state for current frame
+        }
 
-            if (!current_generating_status) {
-                break; // Image generation is complete
+        switch (state) {
+            case GAME_STATE_THEME_SELECTION: {
+                // Handle input
+                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                    if (CheckCollisionPointRec(GetMousePosition(), themeInputBox)) {
+                        themeInputSelected = true;
+                    } else {
+                        themeInputSelected = false;
+                    }
+                }
+
+                int key = GetCharPressed();
+                while (key > 0) {
+                    if (themeInputSelected) {
+                        int len = strlen(theme_input_buffer);
+                        if (key >= 32 && key <= 125 && len < 99) {
+                            theme_input_buffer[len] = (char)key;
+                            theme_input_buffer[len + 1] = '\0';
+                        }
+                    }
+                    key = GetCharPressed();  // Check next character in the queue
+                }
+
+                if (IsKeyPressed(KEY_BACKSPACE) && themeInputSelected) {
+                    int len = strlen(theme_input_buffer);
+                    if (len > 0) {
+                        theme_input_buffer[len - 1] = '\0';
+                    }
+                }
+
+                // Transition to THEME_READY state on ENTER or LLM button click
+                if (IsKeyPressed(KEY_ENTER) && themeInputSelected) {
+                    pthread_mutex_lock(&mutex);
+                    currentGameState = GAME_STATE_THEME_READY;
+                    pthread_mutex_unlock(&mutex);
+                }
+
+                if (CheckCollisionPointRec(GetMousePosition(), llmThemeButton) && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                    llmThemeSelected = true;
+                    pthread_mutex_lock(&mutex);
+                    currentGameState = GAME_STATE_THEME_READY;
+                    pthread_mutex_unlock(&mutex);
+                }
+
+                // Drawing
+                BeginDrawing();
+                ClearBackground(RAYWHITE);
+
+                DrawText("Enter a theme:", 100, 70, 20, GRAY);
+                DrawRectangleRec(themeInputBox, LIGHTGRAY);
+                DrawText(theme_input_buffer, themeInputBox.x + 5, themeInputBox.y + 8, 20, BLACK);
+                if (themeInputSelected) {
+                    DrawRectangleLines(themeInputBox.x, themeInputBox.y, themeInputBox.width, themeInputBox.height, BLUE);
+                }
+
+                // LLM Theme Button
+                DrawRectangleRec(llmThemeButton, ORANGE);
+                DrawText("LLM Random Theme", llmThemeButton.x + 5, llmThemeButton.y + 8, 20, BLACK);
+
+                EndDrawing();
+                break;
             }
+            case GAME_STATE_THEME_READY: {
+                // Drawing for theme ready screen
+                BeginDrawing();
+                ClearBackground(RAYWHITE);
+                DrawText("Theme selected!", SCREEN_WIDTH / 2 - MeasureText("Theme selected!", 30) / 2, SCREEN_HEIGHT / 2 - 50, 30, BLACK);
+                // Display the chosen theme (either user input or LLM selected)
+                // Note: selectedTheme is populated by gameSetupThread, which starts after SPACE is pressed.
+                // So, at this exact moment, selectedTheme might still be NULL if LLM theme was chosen.
+                // We display theme_input_buffer for user-entered, or a generic message for LLM.
+                if (llmThemeSelected) {
+                    DrawText("LLM will choose a theme...", SCREEN_WIDTH / 2 - MeasureText("LLM will choose a theme...", 25) / 2, SCREEN_HEIGHT / 2, 25, DARKGRAY);
+                } else {
+                    DrawText(theme_input_buffer, SCREEN_WIDTH / 2 - MeasureText(theme_input_buffer, 25) / 2, SCREEN_HEIGHT / 2, 25, DARKGRAY);
+                }
+                DrawText("Press SPACE to continue...", SCREEN_WIDTH / 2 - MeasureText("Press SPACE to continue...", 20) / 2, SCREEN_HEIGHT / 2 + 50, 20, GRAY);
+                EndDrawing();
 
-            BeginDrawing();
-            ClearBackground(RAYWHITE);
-            pthread_mutex_lock(&mutex);
-            DrawText(generation_status_message, 10, 10, 20, BLACK);
-            DrawText(current_percent, 10, 40, 20, BLACK);
-            pthread_mutex_unlock(&mutex);
-            EndDrawing();
-        }
+                // Logic to start setup thread
+                if (IsKeyPressed(KEY_SPACE) && !setup_in_progress) {
+                    // Allocate args for the setup thread
+                    SetupThreadArgs* args = (SetupThreadArgs*)malloc(sizeof(SetupThreadArgs));
+                    if (!args) {
+                        fprintf(stderr, "Failed to allocate memory for setup thread args.\n");
+                        pthread_mutex_lock(&mutex);
+                        currentGameState = GAME_STATE_EXIT;
+                        pthread_mutex_unlock(&mutex);
+                        break;
+                    }
+                    strncpy(args->theme_input, theme_input_buffer, sizeof(args->theme_input) - 1);
+                    args->theme_input[sizeof(args->theme_input) - 1] = '\0';
+                    args->llm_selected = llmThemeSelected;
 
-        // If window was closed during generation, clean up and exit
-        if (WindowShouldClose()) {
-            pthread_join(image_gen_master_thread, NULL); // Ensure thread finishes
-            for (int i = 0; i < numCharacters; ++i) {
-                for (int j = 0; j < 2; ++j) free(characterTraits[i][j]);
-                free(characterTraits[i]);
+                    pthread_mutex_lock(&mutex);
+                    setup_in_progress = true;
+                    snprintf(generation_status_message, sizeof(generation_status_message), "Preparing game data...");
+                    pthread_mutex_unlock(&mutex);
+
+                    if (pthread_create(&gameSetupThreadId, NULL, gameSetupThread, (void*)args) != 0) {
+                        fprintf(stderr, "Failed to create game setup thread.\n");
+                        free(args);
+                        pthread_mutex_lock(&mutex);
+                        currentGameState = GAME_STATE_EXIT;
+                        setup_in_progress = false;
+                        pthread_mutex_unlock(&mutex);
+                    } else {
+                        pthread_mutex_lock(&mutex);
+                        currentGameState = GAME_STATE_IMAGE_GENERATION; // Transition to image generation state
+                        pthread_mutex_unlock(&mutex);
+                    }
+                }
+                break;
             }
-            free(characterTraits);
-            for (int i = 0; i < featureCount; i++) free(characterFeatures[i]);
-            free(characterFeatures);
-            free(charactersRemaining);
-            free(selectedTheme);
-            CloseWindow();
-            pthread_mutex_destroy(&mutex);
-            return 0;
-        }
+            case GAME_STATE_IMAGE_GENERATION: {
+                pthread_mutex_lock(&mutex);
+                bool current_generating_status = generating_images;
+                bool current_setup_in_progress = setup_in_progress;
+                bool current_confirm_regen_prompt_active_local = confirm_regen_prompt_active; // Local copy
+                pthread_mutex_unlock(&mutex);
 
-        // --- Image generation is complete, load player's character image ---
-        pthread_join(image_gen_master_thread, NULL); // Ensure thread is joined
+                // Only transition to playing when both setup and image generation are complete
+                // and no regeneration prompt is active (meaning it was handled or not needed)
+                if (!current_generating_status && !current_setup_in_progress && !current_confirm_regen_prompt_active_local) {
+                    // If gameSetupThread exited early (regen_choice == 0), image_gen_master_thread might not have been created.
+                    // Only join if it was created.
+                    if (pthread_equal(image_gen_master_thread, (pthread_t)0) == 0) { // Check if thread was created
+                        pthread_join(image_gen_master_thread, NULL); // Ensure image gen thread is joined
+                    }
+                    pthread_join(gameSetupThreadId, NULL); // Ensure setup thread is joined
 
-        char player_image_filename[64];
-        snprintf(player_image_filename, sizeof(player_image_filename), "character_%d.png", playerCharacter + 1);
-        Image playerImage = LoadImage(player_image_filename);
-        if (playerImage.data != NULL) {
-            playerCharacterTexture = LoadTextureFromImage(playerImage);
-            UnloadImage(playerImage);
-            printf("Player character image loaded: %s\n", player_image_filename);
-        } else {
-            fprintf(stderr, "Failed to load player character image: %s\n", player_image_filename);
-        }
+                    // Load player image from the new directory
+                    char player_image_filename[MAX_FILEPATH_BUFFER_SIZE]; // Use MAX_FILEPATH_BUFFER_SIZE
+                    snprintf(player_image_filename, sizeof(player_image_filename), "%s/character_%d.png", imageDirectoryPath, playerCharacter + 1);
+                    Image playerImage = LoadImage(player_image_filename);
+                    if (playerImage.data != NULL) {
+                        playerCharacterTexture = LoadTextureFromImage(playerImage);
+                        UnloadImage(playerImage);
+                        printf("Player character image loaded: %s\n", player_image_filename);
+                    } else {
+                        fprintf(stderr, "Failed to load player character image: %s\n", player_image_filename);
+                    }
 
+                    pthread_mutex_lock(&mutex);
+                    currentGameState = GAME_STATE_PLAYING;
+                    pthread_mutex_unlock(&mutex);
+                }
 
-        // Main game loop (actual game play)
-        while (!WindowShouldClose()) {
-            // Drawing
-            BeginDrawing();
-            ClearBackground(RAYWHITE);
-
-            DrawText(playerCharacterString, 10, 10, 20, BLACK);
-            // Example: Draw a button to start the LLM guessing round
-            // MODIFIED: Increased button width
-            Rectangle startGuessingButton = {10, 70, 250, 30}; 
-            DrawRectangleRec(startGuessingButton, BLUE);
-            DrawText("Start Guessing Round", startGuessingButton.x + 5, startGuessingButton.y + 8, 20, WHITE);
-
-            if (CheckCollisionPointRec(GetMousePosition(), startGuessingButton) && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-                // MODIFIED: Pass playerCharacterTexture to llmGuessingRound
-                llmGuessingRound(characterTraits, llmCharacter, selectedTheme, numCharacters, charactersRemaining, &remainingCount, playerCharacterTexture);
+                DrawImageGenerationProgressScreen();
+                break;
             }
+            case GAME_STATE_CONFIRM_REGENERATE_IMAGES: {
+                BeginDrawing();
+                ClearBackground(RAYWHITE);
 
-            EndDrawing();
-        }
+                DrawText("Theme directory already exists.", SCREEN_WIDTH / 2 - MeasureText("Theme directory already exists.", 25) / 2, SCREEN_HEIGHT / 2 - 50, 25, BLACK);
+                DrawText("Re-create images for this theme?", SCREEN_WIDTH / 2 - MeasureText("Re-create images for this theme?", 25) / 2, SCREEN_HEIGHT / 2 - 20, 25, BLACK);
 
-        // Free memory
-        for (int i = 0; i < numCharacters; ++i) {
-            int numCharFeatures = 2; // Each character has 2 features
-            for (int j = 0; j < numCharFeatures; ++j) {
-                free(characterTraits[i][j]);
+                Rectangle yesButton = {SCREEN_WIDTH / 2 - 100, SCREEN_HEIGHT / 2 + 30, 80, 30};
+                Rectangle noButton = {SCREEN_WIDTH / 2 + 20, SCREEN_HEIGHT / 2 + 30, 80, 30};
+
+                DrawRectangleRec(yesButton, GREEN);
+                DrawText("Yes", yesButton.x + 20, yesButton.y + 5, 20, WHITE);
+                DrawRectangleRec(noButton, RED);
+                DrawText("No", noButton.x + 20, noButton.y + 5, 20, WHITE);
+
+                EndDrawing();
+
+                if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                    pthread_mutex_lock(&mutex);
+                    if (CheckCollisionPointRec(GetMousePosition(), yesButton)) {
+                        regen_choice = 1;
+                        confirm_regen_prompt_active = false;
+                        pthread_cond_signal(&regen_cond); // Signal the setup thread
+                        currentGameState = GAME_STATE_IMAGE_GENERATION; // Go back to image generation state
+                    } else if (CheckCollisionPointRec(GetMousePosition(), noButton)) {
+                        regen_choice = 0;
+                        confirm_regen_prompt_active = false;
+                        pthread_cond_signal(&regen_cond); // Signal the setup thread
+                        currentGameState = GAME_STATE_IMAGE_GENERATION; // Go back to image generation state
+                    }
+                    pthread_mutex_unlock(&mutex);
+                }
+                break;
             }
-            free(characterTraits[i]);
-        }
-        free(characterTraits);
+            case GAME_STATE_PLAYING: {
+                // Drawing
+                BeginDrawing();
+                ClearBackground(RAYWHITE);
 
-        // Free character features
+                DrawText(playerCharacterString, 10, 10, 20, BLACK);
+                Rectangle startGuessingButton = {10, 70, 250, 30};
+                DrawRectangleRec(startGuessingButton, BLUE);
+                DrawText("Start Guessing Round", startGuessingButton.x + 5, startGuessingButton.y + 8, 20, WHITE);
+
+                if (CheckCollisionPointRec(GetMousePosition(), startGuessingButton) && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                    // MODIFIED: Pass playerCharacterTexture and playerCharacter to llmGuessingRound
+                    llmGuessingRound(characterTraits, llmCharacter, selectedTheme, NUM_CHARACTERS, charactersRemaining, &remainingCount, playerCharacterTexture, playerCharacter);
+                }
+
+                EndDrawing();
+                break;
+            }
+            case GAME_STATE_PLAYER_WINS: {
+                BeginDrawing();
+                ClearBackground(RAYWHITE);
+                DrawText("YOU WIN!", SCREEN_WIDTH / 2 - MeasureText("YOU WIN!", 40) / 2, SCREEN_HEIGHT / 2 - 20, 40, GREEN);
+                DrawText("The LLM eliminated your character!", SCREEN_WIDTH / 2 - MeasureText("The LLM eliminated your character!", 20) / 2, SCREEN_HEIGHT / 2 + 20, 20, DARKGRAY);
+                DrawText("Press ESC to exit", SCREEN_WIDTH / 2 - MeasureText("Press ESC to exit", 20) / 2, SCREEN_HEIGHT / 2 + 60, 20, GRAY);
+                EndDrawing();
+
+                if (IsKeyPressed(KEY_ESCAPE)) {
+                    pthread_mutex_lock(&mutex);
+                    currentGameState = GAME_STATE_EXIT;
+                    pthread_mutex_unlock(&mutex);
+                }
+                break;
+            }
+            case GAME_STATE_LLM_WINS: {
+                // Not implemented yet, but good to have the state
+                BeginDrawing();
+                ClearBackground(RAYWHITE);
+                DrawText("LLM WINS!", SCREEN_WIDTH / 2 - MeasureText("LLM WINS!", 40) / 2, SCREEN_HEIGHT / 2 - 20, 40, RED);
+                DrawText("Press ESC to exit", SCREEN_WIDTH / 2 - MeasureText("Press ESC to exit", 20) / 2, SCREEN_HEIGHT / 2 + 30, 20, GRAY);
+                EndDrawing();
+
+                if (IsKeyPressed(KEY_ESCAPE)) {
+                    pthread_mutex_lock(&mutex);
+                    currentGameState = GAME_STATE_EXIT;
+                    pthread_mutex_unlock(&mutex);
+                }
+                break;
+            }
+            case GAME_STATE_EXIT: {
+                // Clean up and exit
+                break;
+            }
+        }
+    }
+
+    // Free all allocated memory before closing
+    if (selectedTheme) free(selectedTheme);
+    if (characterFeatures) {
         for (int i = 0; i < featureCount; i++) {
             free(characterFeatures[i]);
         }
         free(characterFeatures);
-        free(charactersRemaining);
-    } else {
-        printf("No character features found.\n");
     }
+    if (characterTraits) {
+        for (int i = 0; i < NUM_CHARACTERS; ++i) {
+            if (characterTraits[i]) {
+                for (int j = 0; j < 2; ++j) { // Each character has 2 features
+                    if (characterTraits[i][j]) free(characterTraits[i][j]);
+                }
+                free(characterTraits[i]);
+            }
+        }
+        free(characterTraits);
+    }
+    if (charactersRemaining) free(charactersRemaining);
 
-    free(selectedTheme);
-    // MODIFIED: Unload playerCharacterTexture
     if (playerCharacterTexture.id != 0) {
         UnloadTexture(playerCharacterTexture);
     }
-    CloseWindow(); // Close window and OpenGL context
 
-    // Destroy mutex
-    pthread_mutex_destroy(&mutex);
+    CloseWindow(); // Close window and OpenGL context
+    pthread_mutex_destroy(&mutex); // Destroy mutex
+    pthread_cond_destroy(&regen_cond); // Destroy condition variable
+    curl_global_cleanup(); // Cleanup curl globally
 
     return 0;
 }
