@@ -2,20 +2,40 @@
 
 ## Description
 
-This is a C++ implementation of the classic "Guess Who?" game, enhanced with the power of Language Models (LLMs). The game leverages an LLM to dynamically generate themes and character features, providing a unique and endlessly replayable experience. Players can either provide their own theme or let the LLM generate one. The LLM also helps in the gameplay by asking questions to guess the player's character.
+This is a C implementation of the classic "Guess Who?" game, enhanced with the power of Language Models (LLMs) and a graphical user interface (GUI) built with Raylib. The game leverages an LLM to dynamically generate themes and character features, providing a unique and endlessly replayable experience. It also integrates with an Easy Diffusion server to generate unique images for each character. Players can either provide their own theme or let the LLM generate one. The LLM then acts as the opponent, asking questions to guess the player's character.
+
+## Features
+
+*   **Dynamic Theme Generation:** Choose your own theme or let the LLM suggest 10 random themes for the game.
+*   **AI-Generated Characters:** The LLM generates 8 distinct physical features based on the chosen theme. 24 unique characters are then created, each assigned 2 random features.
+*   **Image Generation:** Connects to an Easy Diffusion server to generate unique 512x512 PNG images for all 24 characters based on their theme and features. Generation progress is displayed in the GUI.
+*   **Interactive Gameplay:**
+    *   A random character is assigned to the player, and its generated image is displayed.
+    *   The LLM (as the opponent) asks yes/no questions about character features.
+    *   Players answer using "Yes" and "No" buttons in the GUI.
+    *   The LLM processes the answer and eliminates characters from its pool of possibilities.
+*   **Graphical User Interface:** Built with Raylib for an interactive and visually engaging experience.
 
 ## Dependencies
 
--   curl: Used for making HTTP requests to the LLM server.
--   rapidjson: A fast JSON parser and generator for C++.
+To compile and run the game, you need the following libraries:
+
+*   **curl:** For making HTTP requests to the LLM server and the Easy Diffusion server.
+*   **jansson:** A C library for encoding, decoding, and manipulating JSON data.
+*   **raylib:** A simple and easy-to-use library to enjoy videogames programming.
+*   **pthread:** POSIX threads for multi-threading (used for image generation).
+
+Ensure these libraries are installed on your system.
 
 ## Compilation
 
-To compile the game, you need to have `g++`, `curl`, and `rapidjson` installed. Ensure that the curl and rapidjson libraries are installed on your system. You can then compile the game using the following command:
+The game is compiled using `gcc`. You can compile it using the provided `Makefile`:
 
 ```bash
-g++ guess_llama.cpp -lcurl -o guess_llama
+make
 ```
+
+This command will compile `guess_llama.c` and link the necessary libraries (`curl`, `jansson`, `raylib`, `pthread`).
 
 After compiling, you can run the game:
 
@@ -23,82 +43,72 @@ After compiling, you can run the game:
 ./guess_llama
 ```
 
+## Configuration
+
+Before running, you might need to adjust the `username` and `server_url` constants in `guess_llama.c` to match your Easy Diffusion server setup:
+
+```c
+const char* username = "USERNAME";                             //Add username Here.
+const char* server_url = "EASY_DIFFUSION_SERVER_ADDRESS:PORT";         //Add Easy Diffusion Server:Port here.
+```
+
+Similarly, the `llmServerAddress` needs to point to your LLM API endpoint:
+
+```c
+const char* llmServerAddress = "http://LLM_SERVER_ADDRESS:PORT";
+```
+
 ## Usage
 
-When you run the game, you will be prompted to enter a theme. You can either enter a theme of your choice or leave it blank to have the LLM generate a random theme for you. After the theme is selected, the LLM will generate a set of character features. The game will then assign a character to you, and the LLM will start asking questions to guess your character. The LLM will ask a series of yes/no questions, and based on your answers, it will attempt to narrow down the possibilities and eventually guess your character. The game currently runs for a fixed number of rounds.
+1.  **Theme Selection:**
+    *   Upon launching, you'll see a text input box to "Enter a theme". Type your desired theme (e.g., "Capybara", "Space Aliens").
+    *   Alternatively, click the "LLM Random Theme" button to have the LLM suggest a theme for you.
+    *   Press `ENTER` after typing your theme, then `SPACE` to continue.
 
-## Example
+2.  **Character Generation:**
+    *   The game will then connect to the Easy Diffusion server to generate images for all 24 characters. A status message and percentage will be displayed during this process. This may take some time depending on your server's performance.
+    *   Once all images are generated, they are saved as `character_X.png` files in the game's directory.
 
-Here's an example of how to run the game and the kind of output you can expect:
+3.  **Player Character Assignment:**
+    *   A random character is assigned to you, and its image is displayed on the screen. You'll also see its features listed.
 
-```bash
-./guess_llama
-```
+4.  **LLM Guessing Round:**
+    *   The LLM will start asking yes/no questions about character features (e.g., "Does your character have a big red nose?").
+    *   Answer by clicking the "Yes" or "No" buttons in the GUI.
+    *   Based on your answer, the LLM will eliminate characters from its internal list of possibilities.
+    *   This process repeats, with the LLM trying to narrow down the characters until it can make a guess.
 
-```text
-Enter a theme for the game (or leave blank for a random theme): Capybara
-Using theme: Capybara
-Character features:
-- Wearing Sunglasses
-- Has a Flower Behind Ear
-- Wet Fur
-- Missing a Tooth
-- Wearing a Bandana
-- Long Whiskers
-- Has a Small Scar
-- Eating a Fruit
-
-Character Traits:
-Character 1: Eating a Fruit, Wearing a Bandana
-Character 2: Has a Flower Behind Ear, Wearing a Bandana, Long Whiskers
-Character 3: Wearing a Bandana, Eating a Fruit, Missing a Tooth
-Character 4: Long Whiskers, Has a Flower Behind Ear
-Character 5: Wearing a Bandana, Missing a Tooth, Has a Small Scar
-Character 6: Wearing a Bandana, Wearing Sunglasses
-Character 7: Missing a Tooth, Long Whiskers, Wet Fur
-Character 8: Has a Small Scar, Missing a Tooth
-Character 9: Has a Small Scar, Wet Fur
-Character 10: Wearing a Bandana, Has a Small Scar
-Character 11: Has a Flower Behind Ear, Long Whiskers, Wearing a Bandana
-Character 12: Wearing a Bandana, Missing a Tooth, Eating a Fruit
-Character 13: Wearing a Bandana, Wearing Sunglasses
-Character 14: Missing a Tooth, Long Whiskers
-Character 15: Has a Flower Behind Ear, Missing a Tooth
-Character 16: Has a Small Scar, Wearing a Bandana, Has a Flower Behind Ear
-Character 17: Wearing Sunglasses, Long Whiskers
-Character 18: Wearing a Bandana, Has a Small Scar
-Character 19: Has a Flower Behind Ear, Long Whiskers
-Character 20: Has a Small Scar, Has a Flower Behind Ear, Wearing Sunglasses
-Character 21: Missing a Tooth, Wet Fur
-Character 22: Wearing a Bandana, Has a Flower Behind Ear
-Character 23: Has a Small Scar, Long Whiskers, Missing a Tooth
-Character 24: Wearing a Bandana, Wearing Sunglasses, Long Whiskers
-
-You are character number 21
-LLM asks: Is the character wearing sunglasses?
-Is this true for your character? (yes/no): no
-LLM suggests eliminating characters: 6, 13, 17, 20, 24
-```
+The game currently focuses on the LLM's guessing process and does not have explicit win/loss conditions or a fixed number of rounds.
 
 ## Flowchart
 
 ```mermaid
         graph TD
     A[Start] --> B{Get Theme Input};
-    B -- Empty --> C[Get Theme from LLM];
-    B -- Not Empty --> D[Use User-Provided Theme];
-    C --> E[Get Character Features from LLM];
-    D --> E;
-    E --> F{Character Features Found?};
-    F -- Yes --> G[Assign Features to Characters];
-    F -- No --> H[Display Error];
-    G --> I[Assign Player Character];
-    I --> J[Assign LLM Character];
-    J --> K[Display Player Character];
-    K --> L[LLM Guesses];
-    L --> N{User Answers Question};
-    N --> O[LLM Removes Possibilities];
-    O --> L;
-    L --> M[End];
-    H --> M;
+    B -- User Input --> D[Use User-Provided Theme];
+    B -- LLM Random Theme Button --> C[Get Themes from LLM];
+    C --> F[Select Random Theme];
+    D --> E[Get Character Features from LLM];
+    F --> E;
+    E --> G{Character Features Found?};
+    G -- Yes --> H[Assign Features to 24 Characters];
+    G -- No --> I[Display Error & Exit];
+    H --> J[Prepare Batch Image Generation Data];
+    J --> K[Start Image Generation Thread];
+    K --> L{Wait for Image Generation to Complete};
+    L -- Generating --> M[Display Generation Progress];
+    L -- Complete --> N[Load Player Character Image];
+    N --> O[Assign Player Character];
+    O --> P[Assign LLM Character];
+    P --> Q[Initialize Remaining Characters List];
+    Q --> R[Display Player Character & Game UI];
+    R --> S{User Clicks Start Guessing Round};
+    S --> T[LLM Formulates Question];
+    T --> U[Ask Question to User GUI];
+    U --> V{User Answers Yes/No Buttons};
+    V --> W[LLM Eliminates Characters];
+    W --> X[Update Remaining Characters List];
+    X --> T;
+    I --> Z[End];
+    T -- No More Questions / LLM Guesses --> Z;
 ```
