@@ -11,9 +11,10 @@ This is a C implementation of the classic "Guess Who?" game, enhanced with the p
 *   **Image Generation:** Connects to an Easy Diffusion server to generate unique 512x512 PNG images for all 24 characters based on their theme and features. Generation progress is displayed in the GUI.
 *   **Interactive Gameplay:**
     *   A random character is assigned to the player, and its generated image is displayed.
-    *   The LLM (as the opponent) asks yes/no questions about character features.
+    *   The LLM (as the opponent) asks yes/no questions.
     *   Players answer using "Yes" and "No" buttons in the GUI.
     *   The LLM processes the answer and eliminates characters from its pool of possibilities.
+    *   **Player Win Condition:** If the LLM accidentally eliminates the player's character, the player wins!
 *   **Graphical User Interface:** Built with Raylib for an interactive and visually engaging experience.
 
 ## Dependencies
@@ -63,10 +64,11 @@ const char* llmServerAddress = "http://LLM_SERVER_ADDRESS:PORT";
 1.  **Theme Selection:**
     *   Upon launching, you'll see a text input box to "Enter a theme". Type your desired theme (e.g., "Capybara", "Space Aliens").
     *   Alternatively, click the "LLM Random Theme" button to have the LLM suggest a theme for you.
-    *   Press `ENTER` after typing your theme, then `SPACE` to continue.
+    *   After typing your theme, press `ENTER`. If you used the "LLM Random Theme" button, the theme is already confirmed.
+    *   Once the theme is confirmed, a message "Press SPACE to continue..." will appear. Press `SPACE` to proceed.
 
 2.  **Character Generation:**
-    *   The game will then connect to the Easy Diffusion server to generate images for all 24 characters. A status message and percentage will be displayed during this process. This may take some time depending on your server's performance.
+    *   The game will then start preparing game data and generating images for all 24 characters. A status message and percentage will be displayed during this process. This may take some time depending on your server's performance.
     *   Once all images are generated, they are saved as `character_X.png` files in the game's directory.
 
 3.  **Player Character Assignment:**
@@ -76,39 +78,44 @@ const char* llmServerAddress = "http://LLM_SERVER_ADDRESS:PORT";
     *   The LLM will start asking yes/no questions about character features (e.g., "Does your character have a big red nose?").
     *   Answer by clicking the "Yes" or "No" buttons in the GUI.
     *   Based on your answer, the LLM will eliminate characters from its internal list of possibilities.
-    *   This process repeats, with the LLM trying to narrow down the characters until it can make a guess.
-
-The game currently focuses on the LLM's guessing process and does not have explicit win/loss conditions or a fixed number of rounds.
+    *   If the LLM accidentally eliminates your character, you win!
 
 ## Flowchart
 
 ```mermaid
         graph TD
     A[Start] --> B{Get Theme Input};
-    B -- User Input --> D[Use User-Provided Theme];
-    B -- LLM Random Theme Button --> C[Get Themes from LLM];
-    C --> F[Select Random Theme];
-    D --> E[Get Character Features from LLM];
-    F --> E;
-    E --> G{Character Features Found?};
-    G -- Yes --> H[Assign Features to 24 Characters];
-    G -- No --> I[Display Error & Exit];
-    H --> J[Prepare Batch Image Generation Data];
-    J --> K[Start Image Generation Thread];
-    K --> L{Wait for Image Generation to Complete};
-    L -- Generating --> M[Display Generation Progress];
-    L -- Complete --> N[Load Player Character Image];
-    N --> O[Assign Player Character];
-    O --> P[Assign LLM Character];
-    P --> Q[Initialize Remaining Characters List];
-    Q --> R[Display Player Character & Game UI];
-    R --> S{User Clicks Start Guessing Round};
-    S --> T[LLM Formulates Question];
-    T --> U[Ask Question to User GUI];
-    U --> V{User Answers Yes/No Buttons};
-    V --> W[LLM Eliminates Characters];
-    W --> X[Update Remaining Characters List];
-    X --> T;
-    I --> Z[End];
-    T -- No More Questions / LLM Guesses --> Z;
-```
+    B -- User Types & Presses ENTER --> C[Transition to Theme Ready];
+    B -- LLM Random Theme Button Clicked --> C;
+    C --> D{GAME_STATE_THEME_READY};
+    D -- Display Press SPACE to continue... --> D;
+    D -- User Presses SPACE --> E[Launch gameSetupThread];
+    E --> F{GAME_STATE_IMAGE_GENERATION};
+    E --> G[Set generation_status_message];
+    F -- gameSetupThread running --> G;
+    F -- image_gen_master_thread running --> G;
+    G[Display Generation Progress] --> F;
+    E --> H[gameSetupThread: Determine Selected Theme];
+    H --> I[gameSetupThread: Get Character Features from LLM];
+    I --> J{gameSetupThread: Character Features Found?};
+    J -- Yes --> K[gameSetupThread: Assign Features to 24 Characters];
+    J -- No --> Z[Display Error & Exit];
+    K --> L[gameSetupThread: Prepare Batch Image Generation Data];
+    L --> M[gameSetupThread: Launch image_gen_master_thread];
+    M --> N[gameSetupThread: Assign Player Character];
+    N --> O[gameSetupThread: Assign LLM Character];
+    O --> P[gameSetupThread: Initialize Remaining Characters List];
+    P --> Q[gameSetupThread: Set setup_in_progress = false];
+    Q --> F;
+    F -- Both threads complete --> R[Load Player Character Image];
+    R --> S[Display Player Character & Game UI];
+    S --> T{User Clicks Start Guessing Round};
+    T --> U[LLM Formulates Question];
+    U --> V[Ask Question to User GUI];
+    V --> W{User Answers Yes/No Buttons};
+    W --> X[LLM Eliminates Characters];
+    X -- Player Character Eliminated --> PW[Player Wins!];
+    X -- Player Character NOT Eliminated --> Y[Update Remaining Characters List];
+    Y --> U;
+    PW --> Z[End];
+    U -- No More Questions / LLM Guesses --> Z;

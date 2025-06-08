@@ -413,6 +413,54 @@ void process_json_stream_response(const char* stream_response_raw) {
     }
 }
 
+// Function to filter out content within <think>...</think> tags if they appear at the beginning
+// and trim leading/trailing whitespace.
+// Returns a newly allocated string that must be freed by the caller.
+char* filter_think_tags(const char* input_str) {
+    if (!input_str) return strdup("");
+
+    char* temp_str = strdup(input_str);
+    if (!temp_str) {
+        fprintf(stderr, "Failed to allocate memory for temporary string.\n");
+        return strdup("");
+    }
+
+    const char* think_start_tag = "<think>";
+    const char* think_end_tag = "</think>";
+    size_t think_start_len = strlen(think_start_tag);
+    size_t think_end_len = strlen(think_end_tag);
+
+    char* current_content_start = temp_str;
+
+    // Check if the string starts with <think>
+    if (strncmp(current_content_start, think_start_tag, think_start_len) == 0) {
+        char* content_after_start_tag = current_content_start + think_start_len;
+        char* content_before_end_tag = strstr(content_after_start_tag, think_end_tag);
+
+        if (content_before_end_tag != NULL) {
+            // The actual response starts *after* the </think> tag
+            current_content_start = content_before_end_tag + think_end_len;
+        }
+    }
+
+    // Trim leading whitespace
+    while (*current_content_start != '\0' && isspace((unsigned char)*current_content_start)) {
+        current_content_start++;
+    }
+
+    // Trim trailing whitespace
+    char* end_ptr = current_content_start + strlen(current_content_start) - 1;
+    while (end_ptr >= current_content_start && isspace((unsigned char)*end_ptr)) {
+        *end_ptr = '\0';
+        end_ptr--;
+    }
+
+    // Return a new duplicate of the trimmed string
+    char* result = strdup(current_content_start);
+    free(temp_str); // Free the temporary mutable copy
+    return result;
+}
+
 // --- New Helper Functions for Image System Refactor ---
 
 // Function to format the theme name for directory creation
@@ -1110,10 +1158,13 @@ char** getThemesFromLLM(int* themeCount) {
             return NULL;
         }
 
-        const char* contentStr = json_string_value(content);
+        const char* contentStr_raw = json_string_value(content);
+        char* contentStr_processed = filter_think_tags(contentStr_raw); // Filter out <think> tags
 
         // Strip ```json and ``` from the content string
-        char* contentStrStripped = strdup(contentStr);
+        char* contentStrStripped = strdup(contentStr_processed);
+        free(contentStr_processed); // Free the intermediate filtered string
+
         if (strncmp(contentStrStripped, "```json", 7) == 0) {
             memmove(contentStrStripped, contentStrStripped + 7, strlen(contentStrStripped) - 6);
         }
@@ -1243,13 +1294,16 @@ char** getCharacterFeatures(const char* theme, int* featureCount) {
             return NULL;
         }
 
-        const char* contentStr = json_string_value(content);
+        const char* contentStr_raw = json_string_value(content);
+        char* contentStr_processed = filter_think_tags(contentStr_raw); // Filter out <think> tags
 
         // Add debug logging: print the content string
-        //printf("Content string: %s\n", contentStr);
+        //printf("Content string: %s\n", contentStr_processed);
 
         // Strip ```json and ``` from the content string
-        char* contentStrStripped = strdup(contentStr);
+        char* contentStrStripped = strdup(contentStr_processed);
+        free(contentStr_processed); // Free the intermediate filtered string
+
         if (strncmp(contentStrStripped, "```json", 7) == 0) {
             memmove(contentStrStripped, contentStrStripped + 7, strlen(contentStrStripped) - 6);
         }
@@ -1348,6 +1402,7 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
         char* characterString = NULL;
         if (asprintf(&characterString, "Character %d: ", i + 1) == -1) {
             fprintf(stderr, "Failed to construct character string\n");
+            if (characterList) free(characterList); // Free characterList on error
             return;
         }
 
@@ -1357,6 +1412,7 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
                 if (asprintf(&temp, "%s%s%s", characterString, characterTraits[i][j], (j < 1) ? ", " : "") == -1) {
                     fprintf(stderr, "Failed to append feature to character string\n");
                     free(characterString);
+                    if (characterList) free(characterList); // Free characterList on error
                     return;
                 }
                 free(characterString);
@@ -1389,9 +1445,10 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
     // Construct the question prompt
     if (asprintf(&questionPrompt, "Given the theme '%s' and the following list of characters and their traits: %s Your goal is to guess the player's character, which is one of the characters in this list. Formulate a yes/no question that will help you narrow down the possibilities. The question should be about a single trait from the list of character features. Return the question as a string, only the question and nothing else.", theme, characterList ? characterList : "") == -1) {
         fprintf(stderr, "Failed to construct question prompt\n");
-        free(characterList);
+        if (characterList) free(characterList); // Free characterList on error
         return;
     }
+    // characterList is NOT freed here, as it's needed for eliminationPrompt
 
     // Print the prompt before sending it to the LLM
     printf("Prompt sent to LLM:\n%s\n", questionPrompt);
@@ -1399,6 +1456,8 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
     double temperature = 0.7;
     char* llmQuestionResponse = getLLMResponse(questionPrompt, temperature);
     free(questionPrompt);
+
+    char* question_filtered = NULL; // Declare here to ensure scope for freeing
 
     if (llmQuestionResponse != NULL) {
         // Parse the JSON response
@@ -1408,7 +1467,7 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
         if (!root) {
             fprintf(stderr, "Error parsing JSON: %s\n", error.text);
             free(llmQuestionResponse);
-            if (characterList) free(characterList);
+            if (characterList) free(characterList); // Free characterList on error
             return;
         }
 
@@ -1418,7 +1477,7 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             fprintf(stderr, "Raw LLM Response: %s\n", llmQuestionResponse); // Print the raw response for debugging
             json_decref(root);
             free(llmQuestionResponse);
-            if (characterList) free(characterList);
+            if (characterList) free(characterList); // Free characterList on error
             return;
         }
 
@@ -1427,7 +1486,7 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             fprintf(stderr, "Error: First choice is not an object.\n");
             json_decref(root);
             free(llmQuestionResponse);
-            if (characterList) free(characterList);
+            if (characterList) free(characterList); // Free characterList on error
             return;
         }
 
@@ -1436,7 +1495,7 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             fprintf(stderr, "Error: 'message' is not an object.\n");
             json_decref(root);
             free(llmQuestionResponse);
-            if (characterList) free(characterList);
+            if (characterList) free(characterList); // Free characterList on error
             return;
         }
 
@@ -1445,15 +1504,16 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             fprintf(stderr, "Error: 'content' is not a string.\n");
             json_decref(root);
             free(llmQuestionResponse);
-            if (characterList) free(characterList);
+            if (characterList) free(characterList); // Free characterList on error
             return;
         }
 
-        const char* question = json_string_value(content);
+        const char* question_raw = json_string_value(content);
+        question_filtered = filter_think_tags(question_raw); // Filter out <think> tags
 
         // Ask the question to the user (using Raylib GUI)
-        printf("LLM asks: %s\n", question);
-        setYesNoInput(question); // Set the question for the GUI
+        printf("LLM asks: %s\n", question_filtered);
+        setYesNoInput(question_filtered); // Set the question for the GUI
 
         // Wait for the user to answer
         while (currentAnswer == -1 && !WindowShouldClose()) {
@@ -1495,7 +1555,8 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             // Handle window close event
             json_decref(root);
             free(llmQuestionResponse);
-            if (characterList) free(characterList);
+            if (question_filtered) free(question_filtered); // Free filtered string on exit
+            if (characterList) free(characterList); // Free characterList on exit
             return;
         }
 
@@ -1514,12 +1575,14 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             }
         }
 
-        if (asprintf(&eliminationPrompt, "Given the theme '%s', the question '%s' was asked, and the answer was '%s'. Given the following list of characters and their traits: %s %s Return a JSON list of integers, only the character numbers and nothing else.", theme, question, answerString, characterList ? characterList : "", eliminationInstruction ? eliminationInstruction : "") == -1) {
+        // Use question_filtered here
+        if (asprintf(&eliminationPrompt, "Given the theme '%s', the question '%s' was asked, and the answer was '%s'. Given the following list of characters and their traits: %s %s Return a JSON list of integers, only the character numbers and nothing else.", theme, question_filtered, answerString, characterList ? characterList : "", eliminationInstruction ? eliminationInstruction : "") == -1) {
             fprintf(stderr, "Failed to construct elimination prompt\n");
-            if (characterList) free(characterList);
             json_decref(root);
             free(llmQuestionResponse);
             if (eliminationInstruction) free(eliminationInstruction);
+            if (question_filtered) free(question_filtered); // Free filtered string on error
+            if (characterList) free(characterList); // Free characterList on error
             return;
         }
         if (eliminationInstruction) free(eliminationInstruction); // Free the instruction string
@@ -1534,10 +1597,14 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             printf("Raw LLM Elimination Response: %s\n", llmEliminationResponse);
 
             // Parse the JSON response for the elimination
+            json_error_t error;
             json_t* rootElimination = json_loads(llmEliminationResponse, 0, &error);
             if (!rootElimination) {
                 fprintf(stderr, "Error parsing JSON for elimination: %s\n", error.text);
                 free(llmEliminationResponse);
+                json_decref(root); // Free root from question response
+                if (question_filtered) free(question_filtered); // Free filtered string
+                if (characterList) free(characterList); // Free characterList on error
                 return;
             }
 
@@ -1546,6 +1613,9 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
                 fprintf(stderr, "Error: 'choices' is not a non-empty array for elimination.\n");
                 json_decref(rootElimination);
                 free(llmEliminationResponse);
+                json_decref(root); // Free root from question response
+                if (question_filtered) free(question_filtered); // Free filtered string
+                if (characterList) free(characterList); // Free characterList on error
                 return;
             }
 
@@ -1554,6 +1624,9 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
                 fprintf(stderr, "Error: First choice is not an object for elimination.\n");
                 json_decref(rootElimination);
                 free(llmEliminationResponse);
+                json_decref(root); // Free root from question response
+                if (question_filtered) free(question_filtered); // Free filtered string
+                if (characterList) free(characterList); // Free characterList on error
                 return;
             }
 
@@ -1562,6 +1635,9 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
                 fprintf(stderr, "Error: 'message' is not an object for elimination.\n");
                 json_decref(rootElimination);
                 free(llmEliminationResponse);
+                json_decref(root); // Free root from question response
+                if (question_filtered) free(question_filtered); // Free filtered string
+                if (characterList) free(characterList); // Free characterList on error
                 return;
             }
 
@@ -1570,13 +1646,16 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
                 fprintf(stderr, "Error: 'content' is not a string for elimination.\n");
                 json_decref(rootElimination);
                 free(llmEliminationResponse);
+                json_decref(root); // Free root from question response
+                if (question_filtered) free(question_filtered); // Free filtered string
+                if (characterList) free(characterList); // Free characterList on error
                 return;
             }
 
-            const char* contentStrElimination = json_string_value(contentElimination);
+            const char* contentStrElimination_raw = json_string_value(contentElimination);
+            char* contentStrStrippedElimination = filter_think_tags(contentStrElimination_raw); // Filter out <think> tags
 
             // Strip ```json and ``` from the content string
-            char* contentStrStrippedElimination = strdup(contentStrElimination);
             if (strncmp(contentStrStrippedElimination, "```json", 7) == 0) {
                 memmove(contentStrStrippedElimination, contentStrStrippedElimination + 7, strlen(contentStrStrippedElimination) - 6);
             }
@@ -1592,6 +1671,9 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
                 json_decref(rootElimination);
                 free(llmEliminationResponse);
                 free(contentStrStrippedElimination);
+                json_decref(root); // Free root from question response
+                if (question_filtered) free(question_filtered); // Free filtered string
+                if (characterList) free(characterList); // Free characterList on error
                 return;
             }
 
@@ -1641,18 +1723,18 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             free(contentStrStrippedElimination);
             json_decref(rootElimination);
             free(llmEliminationResponse);
-            return;
         } else {
             fprintf(stderr, "Failed to get elimination response from LLM\n");
         }
 
-        // Cleanup
+        // Cleanup for question response
         json_decref(root);
         free(llmQuestionResponse);
     } else {
         fprintf(stderr, "Failed to get response from LLM\n");
-        if (characterList) free(characterList);
     }
+    if (question_filtered) free(question_filtered); // Free the filtered question string here
+    if (characterList) free(characterList); // Free characterList here, after all uses
 }
 
 // Function to clear the screen and redraw the background
