@@ -828,8 +828,6 @@ bool load_game_data(const char* filename, char** loadedTheme, char*** loadedFeat
     return true;
 }
 
-// --- End New Helper Functions ---
-
 // Adapted generate_image function for character generation
 // MODIFIED: Added image_dir parameter
 int generate_character_image(const char* prompt, int character_number, const char* image_dir) {
@@ -1996,10 +1994,19 @@ void* gameSetupThread(void* arg) {
                 pthread_mutex_unlock(&mutex);
                 return NULL;
             }
-            for (int j = 0; j < numCharFeatures; ++j) {
-                int featureIndex = rand() % featureCount;
-                characterTraits[i][j] = strdup(characterFeatures[featureIndex]);
+            
+            // Assign two distinct features
+            int featureIndex1 = rand() % featureCount;
+            int featureIndex2 = rand() % featureCount;
+            // Ensure featureIndex2 is different from featureIndex1
+            if (featureCount > 1) { // Only if there's more than one feature to choose from
+                while (featureIndex2 == featureIndex1) {
+                    featureIndex2 = rand() % featureCount;
+                }
             }
+
+            characterTraits[i][0] = strdup(characterFeatures[featureIndex1]);
+            characterTraits[i][1] = strdup(characterFeatures[featureIndex2]);
         }
 
         printf("\nCharacter Traits:\n");
