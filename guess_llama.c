@@ -88,12 +88,11 @@ const char* server_url = "EASY_DIFFUSION_SERVER_ADDRESS:PORT";         //Add Eas
 
 // Function to strip the port from the server URL
 char* strip_port(const char* url) {
-    char* stripped_url = strdup(url);
-    char* colon = strchr(stripped_url, ':');
+    char* colon = strchr(strdup(url), ':');
     if (colon != NULL) {
         *colon = '\0';
     }
-    return stripped_url;
+    return strdup(url);
 }
 
 // Define the LLM server address
@@ -459,6 +458,39 @@ char* filter_think_tags(const char* input_str) {
     char* result = strdup(current_content_start);
     free(temp_str); // Free the temporary mutable copy
     return result;
+}
+
+// Function to extract JSON content from a markdown code block (```json ... ```)
+// Returns a newly allocated string that must be freed by the caller.
+// If no markdown block is found, returns a duplicate of the original string.
+char* extract_json_from_markdown(const char* input_str) {
+    if (!input_str) return strdup("");
+
+    const char* json_start_tag = "```json";
+    const char* json_end_tag = "```";
+
+    const char* start_ptr = strstr(input_str, json_start_tag);
+    if (start_ptr) {
+        start_ptr += strlen(json_start_tag); // Move past "```json"
+
+        const char* end_ptr = strstr(start_ptr, json_end_tag);
+        if (end_ptr) {
+            // Found both start and end tags
+            size_t len = end_ptr - start_ptr;
+            char* result = (char*)malloc(len + 1);
+            if (result) {
+                strncpy(result, start_ptr, len);
+                result[len] = '\0';
+                return result;
+            } else {
+                fprintf(stderr, "Failed to allocate memory for extracted JSON.\n");
+                return strdup(""); // Fallback to empty string on allocation failure
+            }
+        }
+    }
+    // If tags not found, or only start tag found without end tag, return a duplicate of the original string
+    // This is a fallback, assuming the content might still be valid JSON even without the markdown.
+    return strdup(input_str);
 }
 
 // --- New Helper Functions for Image System Refactor ---
@@ -1526,7 +1558,7 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             // Draw the player's character image
             if (playerTexture.id != 0) {
                 // MODIFIED: Draw at (195.2, 170) scaled to 0.8
-                DrawTextureEx(playerTexture, (Vector2){195.2f, 170.0f}, 0.8f, 0.8f, WHITE);
+                DrawTextureEx(playerTexture, (Vector2){195.2f, 170.0f}, 0.0f, 0.8f, WHITE); // Changed rotation to 0.0f
             }
 
             // Draw the question
@@ -1600,7 +1632,7 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             json_error_t error;
             json_t* rootElimination = json_loads(llmEliminationResponse, 0, &error);
             if (!rootElimination) {
-                fprintf(stderr, "Error parsing JSON for elimination: %s\n", error.text);
+                fprintf(stderr, "Error parsing JSON: %s\n", error.text);
                 free(llmEliminationResponse);
                 json_decref(root); // Free root from question response
                 if (question_filtered) free(question_filtered); // Free filtered string
@@ -1653,24 +1685,20 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
             }
 
             const char* contentStrElimination_raw = json_string_value(contentElimination);
-            char* contentStrStrippedElimination = filter_think_tags(contentStrElimination_raw); // Filter out <think> tags
+            char* contentStr_filtered_tags = filter_think_tags(contentStrElimination_raw); // Filter out <think> tags
 
-            // Strip ```json and ``` from the content string
-            if (strncmp(contentStrStrippedElimination, "```json", 7) == 0) {
-                memmove(contentStrStrippedElimination, contentStrStrippedElimination + 7, strlen(contentStrStrippedElimination) - 6);
-            }
-            size_t lenElimination = strlen(contentStrStrippedElimination);
-            if (lenElimination > 3 && strcmp(contentStrStrippedElimination + lenElimination - 3, "```") == 0) {
-                contentStrStrippedElimination[lenElimination - 3] = '\0';
-            }
+            // NEW: Extract JSON from markdown block
+            char* json_content_to_parse = extract_json_from_markdown(contentStr_filtered_tags);
+            free(contentStr_filtered_tags); // Free the intermediate filtered string
 
             // Parse the content as a JSON array
-            json_t* contentArrayElimination = json_loads(contentStrStrippedElimination, 0, &error);
+            json_t* contentArrayElimination = json_loads(json_content_to_parse, 0, &error);
+            free(json_content_to_parse); // Free the extracted JSON string
+
             if (!json_is_array(contentArrayElimination)) {
                 fprintf(stderr, "Error parsing content as JSON array for elimination: %s\n", error.text);
                 json_decref(rootElimination);
                 free(llmEliminationResponse);
-                free(contentStrStrippedElimination);
                 json_decref(root); // Free root from question response
                 if (question_filtered) free(question_filtered); // Free filtered string
                 if (characterList) free(characterList); // Free characterList on error
@@ -1718,9 +1746,18 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
                 }
             }
 
+            // Check if LLM has won (only player's character remains)
+            if (*remainingCount == 1) {
+                if (charactersRemaining[0] == playerCharacter) {
+                    pthread_mutex_lock(&mutex);
+                    currentGameState = GAME_STATE_LLM_WINS;
+                    pthread_mutex_unlock(&mutex);
+                    printf("LLM guessed player's character! LLM wins!\n");
+                }
+            }
+
             // Cleanup
             json_decref(contentArrayElimination);
-            free(contentStrStrippedElimination);
             json_decref(rootElimination);
             free(llmEliminationResponse);
         } else {
@@ -1731,7 +1768,7 @@ void llmGuessingRound(char*** characterTraits, int llmCharacter, const char* the
         json_decref(root);
         free(llmQuestionResponse);
     } else {
-        fprintf(stderr, "Failed to get response from LLM\n");
+        fprintf(stderr, "Failed to get response from LLM");
     }
     if (question_filtered) free(question_filtered); // Free the filtered question string here
     if (characterList) free(characterList); // Free characterList here, after all uses
@@ -2366,11 +2403,11 @@ int main() {
                 break;
             }
             case GAME_STATE_LLM_WINS: {
-                // Not implemented yet, but good to have the state
                 BeginDrawing();
                 ClearBackground(RAYWHITE);
                 DrawText("LLM WINS!", SCREEN_WIDTH / 2 - MeasureText("LLM WINS!", 40) / 2, SCREEN_HEIGHT / 2 - 20, 40, RED);
-                DrawText("Press ESC to exit", SCREEN_WIDTH / 2 - MeasureText("Press ESC to exit", 20) / 2, SCREEN_HEIGHT / 2 + 30, 20, GRAY);
+                DrawText("The LLM guessed your character!", SCREEN_WIDTH / 2 - MeasureText("The LLM guessed your character!", 20) / 2, SCREEN_HEIGHT / 2 + 20, 20, DARKGRAY);
+                DrawText("Press ESC to exit", SCREEN_WIDTH / 2 - MeasureText("Press ESC to exit", 20) / 2, SCREEN_HEIGHT / 2 + 60, 20, GRAY);
                 EndDrawing();
 
                 if (IsKeyPressed(KEY_ESCAPE)) {
