@@ -1,9 +1,22 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -g
+CFLAGS = -std=gnu11 -D_GNU_SOURCE -Wall -Wextra -g
 LIBS = -lcurl -ljansson -lraylib -lpthread
+SOURCES = \
+	guess_llama.c \
+	game_state.c \
+	llm_backend.c \
+	storage.c \
+	gameplay.c \
+	game_setup.c \
+	stable-diffusion.c
+OBJECTS = $(SOURCES:.c=.o)
 
-guess_llama: guess_llama.c
-	$(CC) $(CFLAGS) guess_llama.c -o guess_llama $(LIBS)
+.PHONY: all clean
+
+all: guess_llama
+
+guess_llama: $(OBJECTS)
+	$(CC) $(CFLAGS) $(OBJECTS) -o $@ $(LIBS)
 
 clean:
-	rm -f guess_llama
+	rm -f guess_llama $(OBJECTS)
