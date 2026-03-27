@@ -2,120 +2,82 @@
 
 ## Description
 
-This is a C implementation of the classic "Guess Who?" game, enhanced with the power of Language Models (LLMs) and a graphical user interface (GUI) built with Raylib. The game leverages an LLM to dynamically generate themes and character features, providing a unique and endlessly replayable experience. It also integrates with an Easy Diffusion server to generate unique images for each character. Players can either provide their own theme or let the LLM generate one. The LLM then acts as the opponent, asking questions to guess the player's character.
+This project is a C version of "Guess Who?" built with Raylib, libcurl, Jansson, and pthreads. It uses an LLM to generate themes and character traits, then uses a `stable-diffusion.cpp` server to create the character art the LLM reasons over during play.
+
+## Project Layout
+
+```text
+guess_llama.c        Main UI loop and game-state transitions
+guess_llama.h        Shared constants, globals, and cross-module interfaces
+game_state.c         Global game state/config definitions and shared cleanup
+game_setup.c         Setup thread, theme loading, character assignment, image batch startup
+gameplay.c           LLM guessing round and yes/no interaction flow
+llm_backend.c        LLM HTTP calls, vision payloads, and response cleanup helpers
+stable-diffusion.c   stable-diffusion.cpp backend/image generation logic used by the game
+storage.c            Theme directory helpers and JSON save/load logic
+```
 
 ## Features
 
-*   **Dynamic Theme Generation:** Choose your own theme or let the LLM suggest 10 random themes for the game.
-*   **AI-Generated Characters:** The LLM generates 8 distinct physical features based on the chosen theme. 24 unique characters are then created, each assigned 2 random features.
-*   **Image Generation:** Connects to an Easy Diffusion server to generate unique 512x512 PNG images for all 24 characters based on their theme and features. Generation progress is displayed in the GUI.
-*   **Interactive Gameplay:**
-    *   A random character is assigned to the player, and its generated image is displayed.
-    *   The LLM (as the opponent) asks yes/no questions.
-    *   Players answer using "Yes" and "No" buttons in the GUI.
-    *   The LLM processes the answer and eliminates characters from its pool of possibilities.
-    *   **Player Win Condition:** If the LLM accidentally eliminates the player's character, the player wins!
-*   **Graphical User Interface:** Built with Raylib for an interactive and visually engaging experience.
+- Dynamic theme selection from user input or the LLM.
+- AI-generated feature lists for 24 characters per game.
+- Stable Diffusion image generation with progress updates in the Raylib UI.
+- Reusable image/theme directories under `images/<theme_name>/`.
+- Vision-based LLM guessing rounds with yes/no answers in the GUI.
 
 ## Dependencies
 
-To compile and run the game, you need the following libraries:
+- `curl` for HTTP requests
+- `jansson` for JSON parsing/serialization
+- `raylib` for the GUI
+- `pthread` for setup and image-generation threading
 
-*   **curl:** For making HTTP requests to the LLM server and the Easy Diffusion server.
-*   **jansson:** A C library for encoding, decoding, and manipulating JSON data.
-*   **raylib:** A simple and easy-to-use library to enjoy videogames programming.
-*   **pthread:** POSIX threads for multi-threading (used for image generation).
-
-Ensure these libraries are installed on your system.
-
-## Compilation
-
-The game is compiled using `gcc`. You can compile it using the provided `Makefile`:
+## Build
 
 ```bash
 make
 ```
 
-This command will compile `guess_llama.c` and link the necessary libraries (`curl`, `jansson`, `raylib`, `pthread`).
+To clean build artifacts:
 
-After compiling, you can run the game:
+```bash
+make clean
+```
+
+Manual compile equivalent:
+
+```bash
+gcc -std=gnu11 -D_GNU_SOURCE -Wall -Wextra -g \
+  guess_llama.c game_state.c llm_backend.c storage.c gameplay.c game_setup.c stable-diffusion.c \
+  -o guess_llama -lcurl -ljansson -lraylib -lpthread
+```
+
+`stable-diffusion.c` is now a game module, not a standalone executable target.
+
+## Configuration
+
+Edit the server constants in [game_state.c](/home/username/Downloads/github/c_guess_who_raylib_stablediffusion.cpp/game_state.c):
+
+```c
+const char* username = "username";
+const char* server_url = "localhost:1234";
+const char* llmServerAddress = "http://localhost:9090";
+```
+
+## Running
 
 ```bash
 ./guess_llama
 ```
 
-## Configuration
+1. Enter a theme or click `LLM Random Theme`.
+2. Press `ENTER` for a manual theme, then press `SPACE` to start setup.
+3. If an image directory for that theme already exists, choose whether to reuse it or regenerate it.
+4. Wait for feature generation, save/load of game data, and image generation.
+5. Click `Start Guessing Round` and answer the LLM's yes/no question.
 
-Before running, you might need to adjust the `username` and `server_url` constants in `guess_llama.c` to match your Easy Diffusion server setup:
+## Notes
 
-```c
-const char* username = "USERNAME";                             //Add username Here.
-const char* server_url = "EASY_DIFFUSION_SERVER_ADDRESS:PORT";         //Add Easy Diffusion Server:Port here.
-```
-
-Similarly, the `llmServerAddress` needs to point to your LLM API endpoint:
-
-```c
-const char* llmServerAddress = "http://LLM_SERVER_ADDRESS:PORT";
-```
-
-## Usage
-
-1.  **Theme Selection:**
-    *   Upon launching, you'll see a text input box to "Enter a theme". Type your desired theme (e.g., "Capybara", "Space Aliens").
-    *   Alternatively, click the "LLM Random Theme" button to have the LLM suggest a theme for you.
-    *   After typing your theme, press `ENTER`. If you used the "LLM Random Theme" button, the theme is already confirmed.
-    *   Once the theme is confirmed, a message "Press SPACE to continue..." will appear. Press `SPACE` to proceed.
-
-2.  **Character Generation:**
-    *   The game will then start preparing game data and generating images for all 24 characters. A status message and percentage will be displayed during this process. This may take some time depending on your server's performance.
-    *   Once all images are generated, they are saved as `character_X.png` files in the game's directory.
-
-3.  **Player Character Assignment:**
-    *   A random character is assigned to you, and its image is displayed on the screen. You'll also see its features listed.
-
-4.  **LLM Guessing Round:**
-    *   The LLM will start asking yes/no questions about character features (e.g., "Does your character have a big red nose?").
-    *   Answer by clicking the "Yes" or "No" buttons in the GUI.
-    *   Based on your answer, the LLM will eliminate characters from its internal list of possibilities.
-    *   If the LLM accidentally eliminates your character, you win!
-
-## Flowchart
-
-```mermaid
-        graph TD
-    A[Start] --> B{Get Theme Input};
-    B -- User Types & Presses ENTER --> C[Transition to Theme Ready];
-    B -- LLM Random Theme Button Clicked --> C;
-    C --> D{GAME_STATE_THEME_READY};
-    D -- Display Press SPACE to continue... --> D;
-    D -- User Presses SPACE --> E[Launch gameSetupThread];
-    E --> F{GAME_STATE_IMAGE_GENERATION};
-    E --> G[Set generation_status_message];
-    F -- gameSetupThread running --> G;
-    F -- image_gen_master_thread running --> G;
-    G[Display Generation Progress] --> F;
-    E --> H[gameSetupThread: Determine Selected Theme];
-    H --> I[gameSetupThread: Get Character Features from LLM];
-    I --> J{gameSetupThread: Character Features Found?};
-    J -- Yes --> K[gameSetupThread: Assign Features to 24 Characters];
-    J -- No --> Z[Display Error & Exit];
-    K --> L[gameSetupThread: Prepare Batch Image Generation Data];
-    L --> M[gameSetupThread: Launch image_gen_master_thread];
-    M --> N[gameSetupThread: Assign Player Character];
-    N --> O[gameSetupThread: Assign LLM Character];
-    O --> P[gameSetupThread: Initialize Remaining Characters List];
-    P --> Q[gameSetupThread: Set setup_in_progress = false];
-    Q --> F;
-    F -- Both threads complete --> R[Load Player Character Image];
-    R --> S[Display Player Character & Game UI];
-    S --> T{User Clicks Start Guessing Round};
-    T --> U[LLM Formulates Question];
-    U --> V[Ask Question to User GUI];
-    V --> W{User Answers Yes/No Buttons};
-    W --> X[LLM Eliminates Characters];
-    X -- Player Character Eliminated --> PW[Player Wins!];
-    X -- Player Character NOT Eliminated --> Y[Update Remaining Characters List];
-    Y --> U;
-    PW --> Z[End];
-    U -- No More Questions / LLM Guesses --> Z;
+- Generated assets and game metadata are stored in `images/<formatted_theme>/`.
+- `game_data.json` is reused when you keep existing theme data.
+- The LLM currently reasons over generated PNGs saved as `character_<n>.png`.
