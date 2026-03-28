@@ -341,6 +341,7 @@ static char* llm_generate_question(
     const char* imageDirectory
 ) {
     char** imagePaths = NULL;
+    int* imageCharacterNumbers = NULL;
     int validCharacterCount = 0;
     char* initialPrompt = NULL;
     const char* finalPrompt =
@@ -357,7 +358,7 @@ static char* llm_generate_question(
         remainingCharacterCount,
         imageDirectory,
         &validCharacterCount,
-        NULL
+        &imageCharacterNumbers
     );
     if (!imagePaths) {
         return NULL;
@@ -375,6 +376,7 @@ static char* llm_generate_question(
         ) == -1) {
         fprintf(stderr, "Failed to construct initial prompt\n");
         freeImagePaths(imagePaths, validCharacterCount);
+        free(imageCharacterNumbers);
         return NULL;
     }
 
@@ -384,13 +386,14 @@ static char* llm_generate_question(
         initialPrompt,
         (const char**)imagePaths,
         validCharacterCount,
-        NULL,
+        imageCharacterNumbers,
         finalPrompt,
         0.7
     );
 
     free(initialPrompt);
     freeImagePaths(imagePaths, validCharacterCount);
+    free(imageCharacterNumbers);
 
     if (!llmQuestionResponse) {
         fprintf(stderr, "Failed to get response from LLM\n");
