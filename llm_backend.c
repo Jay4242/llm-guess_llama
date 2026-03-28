@@ -291,6 +291,8 @@ static char** parse_string_array_from_content(const char* content, int* itemCoun
     json_error_t error;
     json_t* array;
     char* filtered_content = filter_think_tags(content);
+    fprintf(stderr, "[LLM Response Raw]: %s\n", content);
+    fprintf(stderr, "[LLM Response Filtered]: %s\n", filtered_content);
     char* json_content = extract_json_from_markdown(filtered_content);
     char** items = NULL;
 
@@ -427,6 +429,7 @@ char* getLLMResponseWithVision(
     const char* initial_prompt,
     const char** image_paths,
     int image_count,
+    const int* image_labels,
     const char* final_prompt,
     double temperature
 ) {
@@ -465,13 +468,14 @@ char* getLLMResponseWithVision(
         char* base64_image = read_image_as_base64(image_paths[i]);
         char* data_url = NULL;
         char character_label[32];
+        int character_number = (image_labels && image_labels[i] > 0) ? image_labels[i] : (i + 1);
 
         if (!base64_image) {
             fprintf(stderr, "Failed to encode image %d: %s\n", i + 1, image_paths[i]);
             goto cleanup;
         }
 
-        snprintf(character_label, sizeof(character_label), "Character %d:", i + 1);
+        snprintf(character_label, sizeof(character_label), "Character %d:", character_number);
         if (append_text_content_item(user_content, character_label) < 0) {
             free(base64_image);
             goto cleanup;
@@ -577,9 +581,11 @@ char* filter_think_tags(const char* input_str) {
     size_t think_start_len = strlen(think_start_tag);
     size_t think_end_len = strlen(think_end_tag);
     char* temp_str;
-    char* current_content_start;
-    char* end_ptr;
+    char* current_pos;
+    char* think_start_found;
+    char* think_end_found;
     char* result;
+    size_t result_len;
 
     if (!input_str) {
         return strdup("");
@@ -591,28 +597,31 @@ char* filter_think_tags(const char* input_str) {
         return strdup("");
     }
 
-    current_content_start = temp_str;
-    if (strncmp(current_content_start, think_start_tag, think_start_len) == 0) {
-        char* content_after_start_tag = current_content_start + think_start_len;
-        char* content_before_end_tag = strstr(content_after_start_tag, think_end_tag);
-        if (content_before_end_tag) {
-            current_content_start = content_before_end_tag + think_end_len;
+    current_pos = temp_str;
+    while ((think_start_found = strstr(current_pos, think_start_tag)) != NULL) {
+        think_end_found = strstr(think_start_found + think_start_len, think_end_tag);
+        if (think_end_found) {
+            memmove(think_start_found, think_end_found + think_end_len,
+                    strlen(think_end_found + think_end_len) + 1);
+        } else {
+            break;
         }
+        current_pos = think_start_found;
     }
 
-    while (*current_content_start != '\0' &&
-           isspace((unsigned char)*current_content_start)) {
-        current_content_start++;
+    while (*current_pos != '\0' &&
+           isspace((unsigned char)*current_pos)) {
+        current_pos++;
     }
 
-    end_ptr = current_content_start + strlen(current_content_start);
-    while (end_ptr > current_content_start &&
-           isspace((unsigned char)*(end_ptr - 1))) {
-        --end_ptr;
+    result_len = strlen(current_pos);
+    while (result_len > 0 &&
+           isspace((unsigned char)current_pos[result_len - 1])) {
+        result_len--;
     }
-    *end_ptr = '\0';
+    current_pos[result_len] = '\0';
 
-    result = strdup(current_content_start);
+    result = strdup(current_pos);
     free(temp_str);
     return result;
 }
