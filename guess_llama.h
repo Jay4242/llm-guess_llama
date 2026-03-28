@@ -111,6 +111,7 @@ char* getLLMResponseWithVision(
     const char* initial_prompt,
     const char** image_paths,
     int image_count,
+    const int* image_labels,
     const char* final_prompt,
     double temperature
 );
