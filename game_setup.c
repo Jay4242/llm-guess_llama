@@ -61,37 +61,77 @@ static bool assignPlayerAndOpponent(void) {
 }
 
 static bool buildCharacterTraits(void) {
-    characterTraits = calloc(NUM_CHARACTERS, sizeof(char**));
-    if (!characterTraits) {
+    typedef struct {
+        int first;
+        int second;
+    } TraitPair;
+
+    size_t pairCount = 0;
+    size_t pairIndex = 0;
+    TraitPair* pairs = NULL;
+
+    if (featureCount < 2) {
+        fprintf(stderr, "Need at least 2 features to assign character traits.\n");
+        return false;
+    }
+
+    pairCount = ((size_t)featureCount * (size_t)(featureCount - 1)) / 2;
+    if (pairCount < (size_t)NUM_CHARACTERS) {
+        fprintf(
+            stderr,
+            "Not enough unique feature pairs: have %zu, need %d.\n",
+            pairCount,
+            NUM_CHARACTERS
+        );
+        return false;
+    }
+
+    pairs = malloc(pairCount * sizeof(TraitPair));
+    if (!pairs) {
         fprintf(stderr, "Memory allocation failed\n");
         return false;
     }
 
-    for (int i = 0; i < NUM_CHARACTERS; ++i) {
-        int featureIndex1;
-        int featureIndex2;
+    for (int i = 0; i < featureCount; ++i) {
+        for (int j = i + 1; j < featureCount; ++j) {
+            pairs[pairIndex].first = i;
+            pairs[pairIndex].second = j;
+            ++pairIndex;
+        }
+    }
 
+    for (size_t i = pairCount - 1; i > 0; --i) {
+        size_t j = (size_t)(rand() % (int)(i + 1));
+        TraitPair temp = pairs[i];
+        pairs[i] = pairs[j];
+        pairs[j] = temp;
+    }
+
+    characterTraits = calloc(NUM_CHARACTERS, sizeof(char**));
+    if (!characterTraits) {
+        fprintf(stderr, "Memory allocation failed\n");
+        free(pairs);
+        return false;
+    }
+
+    for (int i = 0; i < NUM_CHARACTERS; ++i) {
         characterTraits[i] = calloc(2, sizeof(char*));
         if (!characterTraits[i]) {
             fprintf(stderr, "Memory allocation failed\n");
+            free(pairs);
             return false;
         }
 
-        featureIndex1 = rand() % featureCount;
-        featureIndex2 = rand() % featureCount;
-        if (featureCount > 1) {
-            while (featureIndex2 == featureIndex1) {
-                featureIndex2 = rand() % featureCount;
-            }
-        }
-
-        characterTraits[i][0] = strdup(characterFeatures[featureIndex1]);
-        characterTraits[i][1] = strdup(characterFeatures[featureIndex2]);
+        characterTraits[i][0] = strdup(characterFeatures[pairs[i].first]);
+        characterTraits[i][1] = strdup(characterFeatures[pairs[i].second]);
         if (!characterTraits[i][0] || !characterTraits[i][1]) {
             fprintf(stderr, "Memory allocation failed\n");
+            free(pairs);
             return false;
         }
     }
+
+    free(pairs);
 
     printf("\nCharacter Traits:\n");
     for (int i = 0; i < NUM_CHARACTERS; ++i) {
