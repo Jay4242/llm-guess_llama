@@ -1,0 +1,207 @@
+{
+    "theme": "Cat",
+    "features": [
+        "a hat",
+        "a bow tie",
+        "sunglasses",
+        "a cape",
+        "a monocle",
+        "a scarf",
+        "a vest",
+        "boots"
+    ],
+    "characters": [
+        {
+            "id": 1,
+            "traits": [
+                "sunglasses",
+                "boots"
+            ],
+            "prompt": "A Cat, sunglasses, boots"
+        },
+        {
+            "id": 2,
+            "traits": [
+                "a hat",
+                "a bow tie"
+            ],
+            "prompt": "A Cat, a hat, a bow tie"
+        },
+        {
+            "id": 3,
+            "traits": [
+                "a scarf",
+                "a vest"
+            ],
+            "prompt": "A Cat, a scarf, a vest"
+        },
+        {
+            "id": 4,
+            "traits": [
+                "a cape",
+                "a monocle"
+            ],
+            "prompt": "A Cat, a cape, a monocle"
+        },
+        {
+            "id": 5,
+            "traits": [
+                "a vest",
+                "boots"
+            ],
+            "prompt": "A Cat, a vest, boots"
+        },
+        {
+            "id": 6,
+            "traits": [
+                "a scarf",
+                "boots"
+            ],
+            "prompt": "A Cat, a scarf, boots"
+        },
+        {
+            "id": 7,
+            "traits": [
+                "a bow tie",
+                "sunglasses"
+            ],
+            "prompt": "A Cat, a bow tie, sunglasses"
+        },
+        {
+            "id": 8,
+            "traits": [
+                "a bow tie",
+                "a monocle"
+            ],
+            "prompt": "A Cat, a bow tie, a monocle"
+        },
+        {
+            "id": 9,
+            "traits": [
+                "a cape",
+                "boots"
+            ],
+            "prompt": "A Cat, a cape, boots"
+        },
+        {
+            "id": 10,
+            "traits": [
+                "a cape",
+                "a scarf"
+            ],
+            "prompt": "A Cat, a cape, a scarf"
+        },
+        {
+            "id": 11,
+            "traits": [
+                "a hat",
+                "a vest"
+            ],
+            "prompt": "A Cat, a hat, a vest"
+        },
+        {
+            "id": 12,
+            "traits": [
+                "sunglasses",
+                "a vest"
+            ],
+            "prompt": "A Cat, sunglasses, a vest"
+        },
+        {
+            "id": 13,
+            "traits": [
+                "a hat",
+                "a scarf"
+            ],
+            "prompt": "A Cat, a hat, a scarf"
+        },
+        {
+            "id": 14,
+            "traits": [
+                "a monocle",
+                "a vest"
+            ],
+            "prompt": "A Cat, a monocle, a vest"
+        },
+        {
+            "id": 15,
+            "traits": [
+                "a monocle",
+                "boots"
+            ],
+            "prompt": "A Cat, a monocle, boots"
+        },
+        {
+            "id": 16,
+            "traits": [
+                "a hat",
+                "a cape"
+            ],
+            "prompt": "A Cat, a hat, a cape"
+        },
+        {
+            "id": 17,
+            "traits": [
+                "sunglasses",
+                "a scarf"
+            ],
+            "prompt": "A Cat, sunglasses, a scarf"
+        },
+        {
+            "id": 18,
+            "traits": [
+                "a bow tie",
+                "a cape"
+            ],
+            "prompt": "A Cat, a bow tie, a cape"
+        },
+        {
+            "id": 19,
+            "traits": [
+                "a hat",
+                "sunglasses"
+            ],
+            "prompt": "A Cat, a hat, sunglasses"
+        },
+        {
+            "id": 20,
+            "traits": [
+                "a hat",
+                "boots"
+            ],
+            "prompt": "A Cat, a hat, boots"
+        },
+        {
+            "id": 21,
+            "traits": [
+                "sunglasses",
+                "a monocle"
+            ],
+            "prompt": "A Cat, sunglasses, a monocle"
+        },
+        {
+            "id": 22,
+            "traits": [
+                "a bow tie",
+                "boots"
+            ],
+            "prompt": "A Cat, a bow tie, boots"
+        },
+        {
+            "id": 23,
+            "traits": [
+                "a bow tie",
+                "a vest"
+            ],
+            "prompt": "A Cat, a bow tie, a vest"
+        },
+        {
+            "id": 24,
+            "traits": [
+                "a hat",
+                "a monocle"
+            ],
+            "prompt": "A Cat, a hat, a monocle"
+        }
+    ]
+}
