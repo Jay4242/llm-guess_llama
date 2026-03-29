@@ -96,6 +96,34 @@ static void freeEliminationList(char** eliminationList, int eliminationCount) {
     free(eliminationList);
 }
 
+static bool getSingleCandidateFromLLMPerspective(
+    int llmCharacterIndex,
+    const int* remainingCharacters,
+    int remainingCharacterCount,
+    int* candidateIndex
+) {
+    int possibleCount = 0;
+    int lastCandidate = -1;
+
+    for (int i = 0; i < remainingCharacterCount; ++i) {
+        if (remainingCharacters[i] == llmCharacterIndex) {
+            continue;
+        }
+
+        lastCandidate = remainingCharacters[i];
+        ++possibleCount;
+        if (possibleCount > 1) {
+            break;
+        }
+    }
+
+    if (candidateIndex) {
+        *candidateIndex = (possibleCount == 1) ? lastCandidate : -1;
+    }
+
+    return possibleCount == 1;
+}
+
 static char** llm_generate_elimination_list(
     int llmCharacterIndex,
     const char* theme,
@@ -658,6 +686,7 @@ void llmGuessingRound(
     bool waiting_for_question = true;
     bool waiting_for_answer = false;
     bool waiting_for_elimination = false;
+    int singleCandidate = -1;
 
     pthread_mutex_lock(&mutex);
     if (pending_elimination_list) {
@@ -666,6 +695,20 @@ void llmGuessingRound(
         pending_elimination_count = 0;
     }
     pthread_mutex_unlock(&mutex);
+
+    if (getSingleCandidateFromLLMPerspective(
+            llmCharacterIndex,
+            remainingCharacters,
+            *remainingCharacterCount,
+            &singleCandidate
+        ) &&
+        singleCandidate == playerCharacterIndex) {
+        pthread_mutex_lock(&mutex);
+        currentGameState = GAME_STATE_LLM_WINS;
+        pthread_mutex_unlock(&mutex);
+        printf("LLM narrowed it down to the player's character! LLM wins!\n");
+        return;
+    }
 
     if (!startQuestionGenerationThread(
             llmCharacterIndex,
@@ -822,6 +865,8 @@ void llmGuessingRound(
 
             if (!elim_in_progress) {
                 if (elim_success) {
+                    bool playerEliminated = false;
+
                     for (int i = 0; i < elim_count; i++) {
                         int characterToEliminate = atoi(elim_list[i]) - 1;
 
@@ -830,6 +875,7 @@ void llmGuessingRound(
                             currentGameState = GAME_STATE_PLAYER_WINS;
                             pthread_mutex_unlock(&mutex);
                             printf("LLM eliminated player's character! Player wins!\n");
+                            playerEliminated = true;
                             break;
                         }
 
@@ -854,11 +900,21 @@ void llmGuessingRound(
                     pending_elimination_count = 0;
                     pthread_mutex_unlock(&mutex);
 
-                    if (*remainingCharacterCount == 1 && remainingCharacters[0] == playerCharacterIndex) {
+                    if (playerEliminated) {
+                        return;
+                    }
+
+                    if (getSingleCandidateFromLLMPerspective(
+                            llmCharacterIndex,
+                            remainingCharacters,
+                            *remainingCharacterCount,
+                            &singleCandidate
+                        ) &&
+                        singleCandidate == playerCharacterIndex) {
                         pthread_mutex_lock(&mutex);
                         currentGameState = GAME_STATE_LLM_WINS;
                         pthread_mutex_unlock(&mutex);
-                        printf("LLM guessed player's character! LLM wins!\n");
+                        printf("LLM narrowed it down to the player's character! LLM wins!\n");
                         return;
                     }
 
