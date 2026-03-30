@@ -46,6 +46,14 @@ jobs:
             mingw-w64-ucrt-x86_64-curl
             mingw-w64-ucrt-x86_64-jansson
 
+      - name: Verify dependencies
+        shell: msys2 {0}
+        run: |
+          export PATH="/ucrt64/bin:${PATH}"
+          pkg-config --modversion raylib
+          pkg-config --modversion libcurl
+          pkg-config --modversion jansson
+
       - name: Build
         shell: msys2 {0}
         run: |
