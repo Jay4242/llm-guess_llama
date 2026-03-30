@@ -57,10 +57,95 @@ int playerRemainingCount = 0;
 Texture2D playerCharacterTexture = {0};
 Texture2D boardCharacterTextures[NUM_CHARACTERS] = {0};
 bool boardCharacterTexturesLoaded = false;
+RenderTexture2D virtualRenderTarget = {0};
+
+static float virtualScaleX = 1.0f;
+static float virtualScaleY = 1.0f;
 
 const char* username = "username";
 const char* server_url = "localhost:1234";
 const char* llmServerAddress = "http://localhost:9090";
+
+static const char* getEnvOrDefault(const char* name, const char* fallback) {
+    const char* value = getenv(name);
+    if (value == NULL || value[0] == '\0') {
+        return fallback;
+    }
+    return value;
+}
+
+void initRuntimeConfig(void) {
+    username = getEnvOrDefault("GUESS_LLAMA_USERNAME", "username");
+    server_url = getEnvOrDefault("GUESS_LLAMA_SERVER_URL", "localhost:1234");
+    llmServerAddress = getEnvOrDefault("GUESS_LLAMA_LLM_SERVER", "http://localhost:9090");
+}
+
+static void updateVirtualViewport(void) {
+    virtualScaleX = (float)GetScreenWidth() / (float)SCREEN_WIDTH;
+    virtualScaleY = (float)GetScreenHeight() / (float)SCREEN_HEIGHT;
+
+    if (virtualScaleX <= 0.0f) {
+        virtualScaleX = 1.0f;
+    }
+    if (virtualScaleY <= 0.0f) {
+        virtualScaleY = 1.0f;
+    }
+
+}
+
+bool initVirtualRendering(void) {
+    virtualRenderTarget = LoadRenderTexture(SCREEN_WIDTH, SCREEN_HEIGHT);
+    if (virtualRenderTarget.id == 0) {
+        fprintf(stderr, "Failed to create virtual render target.\n");
+        return false;
+    }
+
+    SetTextureFilter(virtualRenderTarget.texture, TEXTURE_FILTER_BILINEAR);
+    updateVirtualViewport();
+    return true;
+}
+
+void beginVirtualFrame(void) {
+    updateVirtualViewport();
+    BeginTextureMode(virtualRenderTarget);
+}
+
+void endVirtualFrame(void) {
+    Rectangle src = {
+        0.0f,
+        0.0f,
+        (float)virtualRenderTarget.texture.width,
+        -(float)virtualRenderTarget.texture.height
+    };
+    Rectangle dst = {0.0f, 0.0f, (float)GetScreenWidth(), (float)GetScreenHeight()};
+
+    EndTextureMode();
+    BeginDrawing();
+    ClearBackground(BLACK);
+    DrawTexturePro(virtualRenderTarget.texture, src, dst, (Vector2){0.0f, 0.0f}, 0.0f, WHITE);
+    EndDrawing();
+}
+
+Vector2 getVirtualMousePosition(void) {
+    Vector2 mousePos = GetMousePosition();
+    Vector2 virtualMousePos = {-1000.0f, -1000.0f};
+
+    if (virtualScaleX <= 0.0f || virtualScaleY <= 0.0f) {
+        return virtualMousePos;
+    }
+
+    virtualMousePos.x = mousePos.x / virtualScaleX;
+    virtualMousePos.y = mousePos.y / virtualScaleY;
+    return virtualMousePos;
+}
+
+float getVirtualScaleX(void) {
+    return virtualScaleX;
+}
+
+float getVirtualScaleY(void) {
+    return virtualScaleY;
+}
 
 bool loadPlayerCharacterTexture(void) {
     char playerImagePath[MAX_FILEPATH_BUFFER_SIZE];
@@ -167,6 +252,11 @@ void freeGameResources(void) {
     if (playerCharacterTexture.id != 0) {
         UnloadTexture(playerCharacterTexture);
         playerCharacterTexture.id = 0;
+    }
+
+    if (virtualRenderTarget.id != 0) {
+        UnloadRenderTexture(virtualRenderTarget);
+        virtualRenderTarget.id = 0;
     }
 
     for (int i = 0; i < NUM_CHARACTERS; ++i) {
