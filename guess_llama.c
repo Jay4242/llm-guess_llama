@@ -71,6 +71,8 @@ int main(void) {
         GameState state;
         bool current_confirm_regen_prompt_active;
 
+        refreshVirtualViewport();
+
         pthread_mutex_lock(&mutex);
         state = currentGameState;
         current_confirm_regen_prompt_active = confirm_regen_prompt_active;
