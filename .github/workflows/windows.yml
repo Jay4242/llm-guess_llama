@@ -1,0 +1,84 @@
+name: Windows Build
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.c"
+      - "**/*.h"
+      - "Makefile"
+      - ".github/workflows/windows.yml"
+  pull_request:
+    paths:
+      - "**/*.c"
+      - "**/*.h"
+      - "Makefile"
+      - ".github/workflows/windows.yml"
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          msystem: UCRT64
+          install: >-
+            base-devel
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-make
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-raylib
+            mingw-w64-ucrt-x86_64-curl
+            mingw-w64-ucrt-x86_64-jansson
+
+      - name: Build
+        shell: msys2 {0}
+        run: |
+          export PATH="/ucrt64/bin:${PATH}"
+          EXTRA_CFLAGS="$(pkg-config --cflags raylib jansson libcurl)"
+          EXTRA_LIBS="$(pkg-config --libs raylib jansson libcurl)"
+          make clean
+          make CC=gcc CFLAGS="-std=gnu11 -D_GNU_SOURCE -Wall -Wextra -g ${EXTRA_CFLAGS}" LIBS="${EXTRA_LIBS} -lpthread"
+
+      - name: Package
+        shell: msys2 {0}
+        run: |
+          export PATH="/ucrt64/bin:${PATH}"
+          bin_name="guess_llama"
+          if [ -f guess_llama.exe ]; then
+            bin_name="guess_llama.exe"
+          fi
+          mkdir -p dist
+          cp "$bin_name" dist/
+          cp README.md dist/
+          cp LICENSE dist/
+          tar -czf guess_llama-windows-ucrt64.tar.gz -C dist .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: guess_llama-windows-ucrt64
+          path: guess_llama-windows-ucrt64.tar.gz
+
+      - name: Upload release asset
+        if: github.event_name == 'release' && github.event.action == 'published'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: guess_llama-windows-ucrt64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
