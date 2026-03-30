@@ -71,15 +71,16 @@ jobs:
           if [ -f guess_llama.exe ]; then
             bin_name="guess_llama.exe"
           fi
-          mkdir -p dist
-          cp "$bin_name" dist/
-          cp README.md dist/
-          cp LICENSE dist/
+          package_dir="package_root/guess_llama/windows-ucrt64"
+          mkdir -p "$package_dir"
+          cp "$bin_name" "$package_dir"/
+          cp README.md "$package_dir"/
+          cp LICENSE "$package_dir"/
 
       - name: Create zip archive
         shell: pwsh
         run: |
-          Compress-Archive -Path dist/* -DestinationPath guess_llama-windows-ucrt64.zip -Force
+          Compress-Archive -Path package_root/guess_llama -DestinationPath guess_llama-windows-ucrt64.zip -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
