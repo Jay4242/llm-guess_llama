@@ -62,6 +62,14 @@ bool directory_exists(const char* path) {
     return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
+static int make_directory(const char* path) {
+#ifdef _WIN32
+    return mkdir(path);
+#else
+    return mkdir(path, S_IRWXU);
+#endif
+}
+
 int create_directory_recursive(const char* path) {
     char* tmp = strdup(path);
     size_t len;
@@ -83,7 +91,7 @@ int create_directory_recursive(const char* path) {
         }
 
         *p = '\0';
-        if (mkdir(tmp, S_IRWXU) != 0 && errno != EEXIST) {
+        if (make_directory(tmp) != 0 && errno != EEXIST) {
             fprintf(stderr, "Failed to create directory %s: %s\n", tmp, strerror(errno));
             ret = -1;
             *p = '/';
@@ -92,7 +100,7 @@ int create_directory_recursive(const char* path) {
         *p = '/';
     }
 
-    if (ret == 0 && mkdir(tmp, S_IRWXU) != 0 && errno != EEXIST) {
+    if (ret == 0 && make_directory(tmp) != 0 && errno != EEXIST) {
         fprintf(stderr, "Failed to create directory %s: %s\n", tmp, strerror(errno));
         ret = -1;
     }
