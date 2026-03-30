@@ -84,6 +84,12 @@ extern int pending_elimination_count;
 extern bool llm_guess_success;
 extern bool llm_should_continue;
 
+extern pthread_t player_question_thread;
+extern bool player_question_thread_started;
+extern bool player_question_in_progress;
+extern bool player_question_success;
+extern char* pending_player_answer;
+
 extern char formattedThemeName[256];
 extern char imageDirectoryPath[MAX_PATH_BUFFER_SIZE];
 extern bool confirm_regen_prompt_active;
@@ -97,8 +103,12 @@ extern int playerCharacter;
 extern int llmCharacter;
 extern int* charactersRemaining;
 extern int remainingCount;
+extern bool playerCharacterActive[NUM_CHARACTERS];
+extern int playerRemainingCount;
 
 extern Texture2D playerCharacterTexture;
+extern Texture2D boardCharacterTextures[NUM_CHARACTERS];
+extern bool boardCharacterTexturesLoaded;
 
 extern const char* username;
 extern const char* server_url;
@@ -175,6 +185,20 @@ extern bool llm_guess_success;
 extern bool llm_should_continue;
 
 bool loadPlayerCharacterTexture(void);
+bool loadBoardCharacterTextures(void);
 void freeGameResources(void);
+
+char* getPlayerQuestionYesNoAnswer(
+    const char* theme,
+    const char* question,
+    int llmCharacterIndex,
+    const char* imageDirectory
+);
+bool startPlayerQuestionThread(
+    const char* theme,
+    const char* question,
+    int llmCharacterIndex,
+    const char* imageDirectory
+);
 
 #endif
