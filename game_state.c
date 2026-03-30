@@ -230,6 +230,10 @@ static void updateVirtualViewport(void) {
 
 }
 
+void refreshVirtualViewport(void) {
+    updateVirtualViewport();
+}
+
 bool initVirtualRendering(void) {
     virtualRenderTarget = LoadRenderTexture(SCREEN_WIDTH, SCREEN_HEIGHT);
     if (virtualRenderTarget.id == 0) {
@@ -264,6 +268,8 @@ void endVirtualFrame(void) {
 }
 
 Vector2 getVirtualMousePosition(void) {
+    updateVirtualViewport();
+
     Vector2 mousePos = GetMousePosition();
     Vector2 virtualMousePos = {-1000.0f, -1000.0f};
 
