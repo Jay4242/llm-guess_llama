@@ -61,6 +61,8 @@ RenderTexture2D virtualRenderTarget = {0};
 
 static float virtualScaleX = 1.0f;
 static float virtualScaleY = 1.0f;
+static float virtualViewportWidth = (float)SCREEN_WIDTH;
+static float virtualViewportHeight = (float)SCREEN_HEIGHT;
 
 const char* username = "username";
 const char* server_url = "localhost:1234";
@@ -218,8 +220,18 @@ void initRuntimeConfig(void) {
 }
 
 static void updateVirtualViewport(void) {
-    virtualScaleX = (float)GetScreenWidth() / (float)SCREEN_WIDTH;
-    virtualScaleY = (float)GetScreenHeight() / (float)SCREEN_HEIGHT;
+    virtualViewportWidth = (float)GetRenderWidth();
+    virtualViewportHeight = (float)GetRenderHeight();
+
+    if (virtualViewportWidth <= 0.0f) {
+        virtualViewportWidth = (float)SCREEN_WIDTH;
+    }
+    if (virtualViewportHeight <= 0.0f) {
+        virtualViewportHeight = (float)SCREEN_HEIGHT;
+    }
+
+    virtualScaleX = virtualViewportWidth / (float)SCREEN_WIDTH;
+    virtualScaleY = virtualViewportHeight / (float)SCREEN_HEIGHT;
 
     if (virtualScaleX <= 0.0f) {
         virtualScaleX = 1.0f;
@@ -258,7 +270,7 @@ void endVirtualFrame(void) {
         (float)virtualRenderTarget.texture.width,
         -(float)virtualRenderTarget.texture.height
     };
-    Rectangle dst = {0.0f, 0.0f, (float)GetScreenWidth(), (float)GetScreenHeight()};
+    Rectangle dst = {0.0f, 0.0f, virtualViewportWidth, virtualViewportHeight};
 
     EndTextureMode();
     BeginDrawing();
@@ -271,11 +283,15 @@ Vector2 getVirtualMousePosition(void) {
     updateVirtualViewport();
 
     Vector2 mousePos = GetMousePosition();
+    Vector2 dpiScale = GetWindowScaleDPI();
     Vector2 virtualMousePos = {-1000.0f, -1000.0f};
 
     if (virtualScaleX <= 0.0f || virtualScaleY <= 0.0f) {
         return virtualMousePos;
     }
+
+    mousePos.x *= dpiScale.x;
+    mousePos.y *= dpiScale.y;
 
     virtualMousePos.x = mousePos.x / virtualScaleX;
     virtualMousePos.y = mousePos.y / virtualScaleY;
