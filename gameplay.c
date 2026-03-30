@@ -96,6 +96,38 @@ static void freeEliminationList(char** eliminationList, int eliminationCount) {
     free(eliminationList);
 }
 
+static void drawCenteredPlayerTexture(Texture2D playerTexture, float centerX, float topY, float textureScale) {
+    if (playerTexture.id == 0) {
+        return;
+    }
+
+    const float imageWidthOnScreen =
+        (float)playerTexture.width * textureScale * getVirtualScaleX();
+    const float imageHeightOnScreen =
+        (float)playerTexture.height * textureScale * getVirtualScaleY();
+    const float squareSizeOnScreen =
+        (imageWidthOnScreen < imageHeightOnScreen) ?
+            imageWidthOnScreen :
+            imageHeightOnScreen;
+    const float destinationWidth = squareSizeOnScreen / getVirtualScaleX();
+    const float destinationHeight = squareSizeOnScreen / getVirtualScaleY();
+    const Rectangle destination = {
+        centerX - destinationWidth * 0.5f,
+        topY,
+        destinationWidth,
+        destinationHeight
+    };
+
+    DrawTexturePro(
+        playerTexture,
+        (Rectangle){0, 0, (float)playerTexture.width, (float)playerTexture.height},
+        destination,
+        (Vector2){0.0f, 0.0f},
+        0.0f,
+        WHITE
+    );
+}
+
 static char* normalizeYesNoAnswer(const char* answerText) {
     const char* cursor = answerText;
     char token[16] = {0};
@@ -993,13 +1025,11 @@ void llmGuessingRound(
                     return;
                 }
             } else {
-                BeginDrawing();
+                beginVirtualFrame();
                 ClearBackground(RAYWHITE);
 
                 DrawText(playerCharacterString, 10, 10, 20, BLACK);
-                if (playerTexture.id != 0) {
-                    DrawTextureEx(playerTexture, (Vector2){195.2f, 170.0f}, 0.0f, 0.8f, WHITE);
-                }
+                drawCenteredPlayerTexture(playerTexture, (float)SCREEN_WIDTH * 0.5f, 170.0f, 0.8f);
 
                 DrawText(
                     "LLM is generating a question...",
@@ -1009,7 +1039,7 @@ void llmGuessingRound(
                     GRAY
                 );
 
-                EndDrawing();
+                endVirtualFrame();
                 continue;
             }
         }
@@ -1018,13 +1048,11 @@ void llmGuessingRound(
             Rectangle yesButton = {100, 120, 80, 30};
             Rectangle noButton = {200, 120, 80, 30};
 
-            BeginDrawing();
+            beginVirtualFrame();
             ClearBackground(RAYWHITE);
 
             DrawText(playerCharacterString, 10, 10, 20, BLACK);
-            if (playerTexture.id != 0) {
-                DrawTextureEx(playerTexture, (Vector2){195.2f, 170.0f}, 0.0f, 0.8f, WHITE);
-            }
+            drawCenteredPlayerTexture(playerTexture, (float)SCREEN_WIDTH * 0.5f, 170.0f, 0.8f);
 
             pthread_mutex_lock(&mutex);
             DrawText(currentQuestion, 100, 70, 20, GRAY);
@@ -1035,9 +1063,9 @@ void llmGuessingRound(
             DrawRectangleRec(noButton, RED);
             DrawText("No", (int)noButton.x + 20, (int)noButton.y + 5, 20, WHITE);
 
-            EndDrawing();
+            endVirtualFrame();
 
-            if (CheckCollisionPointRec(GetMousePosition(), yesButton) &&
+            if (CheckCollisionPointRec(getVirtualMousePosition(), yesButton) &&
                 IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
                 currentAnswer = 1;
                 if (startEliminationThread(
@@ -1059,7 +1087,7 @@ void llmGuessingRound(
                     return;
                 }
             }
-            if (CheckCollisionPointRec(GetMousePosition(), noButton) &&
+            if (CheckCollisionPointRec(getVirtualMousePosition(), noButton) &&
                 IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
                 currentAnswer = 0;
                 if (startEliminationThread(
@@ -1172,12 +1200,12 @@ void llmGuessingRound(
                     return;
                 }
             } else {
-                BeginDrawing();
+                beginVirtualFrame();
                 ClearBackground(RAYWHITE);
                 DrawText("LLM is processing your answer...",
                     SCREEN_WIDTH / 2 - MeasureText("LLM is processing your answer...", 25) / 2,
                     SCREEN_HEIGHT / 2, 25, GRAY);
-                EndDrawing();
+                endVirtualFrame();
             }
         }
 

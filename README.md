@@ -62,12 +62,28 @@ gcc -std=gnu11 -D_GNU_SOURCE -Wall -Wextra -g \
 
 ## Configuration
 
-Edit the server constants in [game_state.c](game_state.c):
+Runtime configuration is read from environment variables (with built-in defaults):
 
-```c
-const char* username = "username";
-const char* server_url = "localhost:1234";
-const char* llmServerAddress = "http://localhost:9090";
+- `GUESS_LLAMA_USERNAME` (default: `username`)
+- `GUESS_LLAMA_SERVER_URL` (default: `localhost:1234`)
+- `GUESS_LLAMA_LLM_SERVER` (default: `http://localhost:9090`)
+
+Linux/macOS example:
+
+```bash
+export GUESS_LLAMA_USERNAME="your-name"
+export GUESS_LLAMA_SERVER_URL="127.0.0.1:1234"
+export GUESS_LLAMA_LLM_SERVER="http://127.0.0.1:9090"
+./guess_llama
+```
+
+PowerShell example:
+
+```powershell
+$env:GUESS_LLAMA_USERNAME = "your-name"
+$env:GUESS_LLAMA_SERVER_URL = "127.0.0.1:1234"
+$env:GUESS_LLAMA_LLM_SERVER = "http://127.0.0.1:9090"
+./guess_llama.exe
 ```
 
 ## Running

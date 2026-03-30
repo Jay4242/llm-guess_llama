@@ -1,13 +1,13 @@
 #include "guess_llama.h"
 
 static void drawImageGenerationProgressScreen(void) {
-    BeginDrawing();
+    beginVirtualFrame();
     ClearBackground(RAYWHITE);
     pthread_mutex_lock(&mutex);
     DrawText(generation_status_message, 10, 10, 20, BLACK);
     DrawText(current_percent, 10, 40, 20, BLACK);
     pthread_mutex_unlock(&mutex);
-    EndDrawing();
+    endVirtualFrame();
 }
 
 int main(void) {
@@ -31,13 +31,25 @@ int main(void) {
     char playerLastAnswer[64] = {0};
     PlayerTurnPhase playerTurnPhase = PLAYER_TURN_PHASE_ASK_QUESTION;
 
+    initRuntimeConfig();
     srand((unsigned int)time(NULL));
 
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Guess Llama");
+    SetWindowMinSize(SCREEN_WIDTH, SCREEN_HEIGHT);
     SetTargetFPS(60);
+
+    if (!initVirtualRendering()) {
+        CloseWindow();
+        return 1;
+    }
 
     if (pthread_mutex_init(&mutex, NULL) != 0) {
         fprintf(stderr, "Mutex initialization failed.\n");
+        if (virtualRenderTarget.id != 0) {
+            UnloadRenderTexture(virtualRenderTarget);
+            virtualRenderTarget.id = 0;
+        }
         CloseWindow();
         return 1;
     }
@@ -45,6 +57,10 @@ int main(void) {
     if (pthread_cond_init(&regen_cond, NULL) != 0) {
         fprintf(stderr, "Condition variable initialization failed.\n");
         pthread_mutex_destroy(&mutex);
+        if (virtualRenderTarget.id != 0) {
+            UnloadRenderTexture(virtualRenderTarget);
+            virtualRenderTarget.id = 0;
+        }
         CloseWindow();
         return 1;
     }
@@ -70,7 +86,7 @@ int main(void) {
         switch (state) {
             case GAME_STATE_THEME_SELECTION: {
                 if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                    themeInputSelected = CheckCollisionPointRec(GetMousePosition(), themeInputBox);
+                    themeInputSelected = CheckCollisionPointRec(getVirtualMousePosition(), themeInputBox);
                 }
 
                 int key = GetCharPressed();
@@ -99,7 +115,7 @@ int main(void) {
                     pthread_mutex_unlock(&mutex);
                 }
 
-                if (CheckCollisionPointRec(GetMousePosition(), llmThemeButton) &&
+                if (CheckCollisionPointRec(getVirtualMousePosition(), llmThemeButton) &&
                     IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
                     llmThemeSelected = true;
                     pthread_mutex_lock(&mutex);
@@ -107,7 +123,7 @@ int main(void) {
                     pthread_mutex_unlock(&mutex);
                 }
 
-                BeginDrawing();
+                beginVirtualFrame();
                 ClearBackground(RAYWHITE);
 
                 DrawText("Enter a theme:", 100, 70, 20, GRAY);
@@ -132,12 +148,12 @@ int main(void) {
                     BLACK
                 );
 
-                EndDrawing();
+                endVirtualFrame();
                 break;
             }
 
             case GAME_STATE_THEME_READY: {
-                BeginDrawing();
+                beginVirtualFrame();
                 ClearBackground(RAYWHITE);
 
                 DrawText(
@@ -173,7 +189,7 @@ int main(void) {
                     20,
                     GRAY
                 );
-                EndDrawing();
+                endVirtualFrame();
 
                 if (IsKeyPressed(KEY_SPACE) && !setup_in_progress) {
                     SetupThreadArgs* args = malloc(sizeof(SetupThreadArgs));
@@ -250,7 +266,7 @@ int main(void) {
                 Rectangle yesButton = {SCREEN_WIDTH / 2 - 100, SCREEN_HEIGHT / 2 + 30, 80, 30};
                 Rectangle noButton = {SCREEN_WIDTH / 2 + 20, SCREEN_HEIGHT / 2 + 30, 80, 30};
 
-                BeginDrawing();
+                beginVirtualFrame();
                 ClearBackground(RAYWHITE);
 
                 DrawText(
@@ -273,16 +289,16 @@ int main(void) {
                 DrawRectangleRec(noButton, RED);
                 DrawText("No", (int)noButton.x + 20, (int)noButton.y + 5, 20, WHITE);
 
-                EndDrawing();
+                endVirtualFrame();
 
                 if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
                     pthread_mutex_lock(&mutex);
-                    if (CheckCollisionPointRec(GetMousePosition(), yesButton)) {
+                    if (CheckCollisionPointRec(getVirtualMousePosition(), yesButton)) {
                         regen_choice = 1;
                         confirm_regen_prompt_active = false;
                         pthread_cond_signal(&regen_cond);
                         currentGameState = GAME_STATE_IMAGE_GENERATION;
-                    } else if (CheckCollisionPointRec(GetMousePosition(), noButton)) {
+                    } else if (CheckCollisionPointRec(getVirtualMousePosition(), noButton)) {
                         regen_choice = 0;
                         confirm_regen_prompt_active = false;
                         pthread_cond_signal(&regen_cond);
@@ -300,6 +316,8 @@ int main(void) {
                 Rectangle endTurnButton = {600, 44, 190, 34};
                 const int boardColumns = 6;
                 const int boardRows = NUM_CHARACTERS / boardColumns;
+                const float virtualScaleX = getVirtualScaleX();
+                const float virtualScaleY = getVirtualScaleY();
                 const float boardPadding = 10.0f;
                 const float boardOriginX = boardPadding;
                 const float boardOriginY =
@@ -307,13 +325,29 @@ int main(void) {
                 const float boardWidth = (float)SCREEN_WIDTH - boardPadding * 2.0f;
                 const float boardHeight = (float)SCREEN_HEIGHT - boardOriginY - boardPadding;
                 const float cellGap = 6.0f;
-                const float cellWidth =
-                    (boardWidth - cellGap * (float)(boardColumns - 1)) / (float)boardColumns;
-                const float cellHeight =
-                    (boardHeight - cellGap * (float)(boardRows - 1)) / (float)boardRows;
+                const float cellGapOnScreenX = cellGap * virtualScaleX;
+                const float cellGapOnScreenY = cellGap * virtualScaleY;
+                const float boardWidthOnScreen = boardWidth * virtualScaleX;
+                const float boardHeightOnScreen = boardHeight * virtualScaleY;
+                const float cellSizeOnScreenX =
+                    (boardWidthOnScreen - cellGapOnScreenX * (float)(boardColumns - 1)) /
+                    (float)boardColumns;
+                const float cellSizeOnScreenY =
+                    (boardHeightOnScreen - cellGapOnScreenY * (float)(boardRows - 1)) /
+                    (float)boardRows;
+                const float cellSizeOnScreen =
+                    (cellSizeOnScreenX < cellSizeOnScreenY) ? cellSizeOnScreenX : cellSizeOnScreenY;
+                const float cellWidth = cellSizeOnScreen / virtualScaleX;
+                const float cellHeight = cellSizeOnScreen / virtualScaleY;
+                const float gridWidth =
+                    cellWidth * (float)boardColumns + cellGap * (float)(boardColumns - 1);
+                const float gridHeight =
+                    cellHeight * (float)boardRows + cellGap * (float)(boardRows - 1);
+                const float gridOriginX = boardOriginX + (boardWidth - gridWidth) * 0.5f;
+                const float gridOriginY = boardOriginY + (boardHeight - gridHeight) * 0.5f;
 
                 if (!guessingRoundStarted) {
-                    BeginDrawing();
+                    beginVirtualFrame();
                     ClearBackground(RAYWHITE);
 
                     DrawRectangleRec(startGuessingButton, BLUE);
@@ -325,9 +359,9 @@ int main(void) {
                         WHITE
                     );
 
-                    EndDrawing();
+                    endVirtualFrame();
 
-                    if (CheckCollisionPointRec(GetMousePosition(), startGuessingButton) &&
+                    if (CheckCollisionPointRec(getVirtualMousePosition(), startGuessingButton) &&
                         IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
                         llmGuessingRound(
                             llmCharacter,
@@ -374,7 +408,8 @@ int main(void) {
 
                 if (playerTurnPhase == PLAYER_TURN_PHASE_ASK_QUESTION &&
                     IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                    playerQuestionInputSelected = CheckCollisionPointRec(GetMousePosition(), questionInputBox);
+                    playerQuestionInputSelected =
+                        CheckCollisionPointRec(getVirtualMousePosition(), questionInputBox);
                 }
 
                 {
@@ -401,7 +436,7 @@ int main(void) {
                 }
 
                 if (playerTurnPhase == PLAYER_TURN_PHASE_ASK_QUESTION &&
-                    CheckCollisionPointRec(GetMousePosition(), submitQuestionButton) &&
+                    CheckCollisionPointRec(getVirtualMousePosition(), submitQuestionButton) &&
                     IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
                     if (strlen(playerQuestionInput) > 0 && !playerQuestionRequestPending) {
                         strncpy(playerLastQuestion, playerQuestionInput, sizeof(playerLastQuestion) - 1);
@@ -454,7 +489,7 @@ int main(void) {
                 }
 
                 if (playerTurnPhase == PLAYER_TURN_PHASE_ELIMINATION &&
-                    CheckCollisionPointRec(GetMousePosition(), endTurnButton) &&
+                    CheckCollisionPointRec(getVirtualMousePosition(), endTurnButton) &&
                     IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
                     if (playerRemainingCount == 1 && playerCharacterActive[llmCharacter]) {
                         pthread_mutex_lock(&mutex);
@@ -470,7 +505,7 @@ int main(void) {
 
                 if (playerTurnPhase == PLAYER_TURN_PHASE_ELIMINATION &&
                     IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-                    Vector2 mousePos = GetMousePosition();
+                    Vector2 mousePos = getVirtualMousePosition();
                     for (int i = 0; i < NUM_CHARACTERS; ++i) {
                         int row = i / boardColumns;
                         int col = i % boardColumns;
@@ -489,7 +524,7 @@ int main(void) {
                     }
                 }
 
-                BeginDrawing();
+                beginVirtualFrame();
                 ClearBackground(RAYWHITE);
 
                 DrawText("Player Turn", 10, 10, 24, BLACK);
@@ -522,7 +557,7 @@ int main(void) {
                             BLACK
                         );
                     }
-                    EndDrawing();
+                    endVirtualFrame();
                     break;
                 }
 
@@ -560,31 +595,46 @@ int main(void) {
                     int row = i / boardColumns;
                     int col = i % boardColumns;
                     Rectangle cellRect = {
-                        boardOriginX + (float)col * (cellWidth + cellGap),
-                        boardOriginY + (float)row * (cellHeight + cellGap),
+                        gridOriginX + (float)col * (cellWidth + cellGap),
+                        gridOriginY + (float)row * (cellHeight + cellGap),
                         cellWidth,
                         cellHeight
                     };
-                    const float imagePadding = 4.0f;
+                    const float imagePaddingOnScreen = 4.0f *
+                        ((virtualScaleX < virtualScaleY) ? virtualScaleX : virtualScaleY);
+                    const float imagePaddingX = imagePaddingOnScreen / virtualScaleX;
+                    const float imagePaddingY = imagePaddingOnScreen / virtualScaleY;
                     Rectangle imageRect = {
-                        cellRect.x + imagePadding,
-                        cellRect.y + imagePadding,
-                        cellRect.width - imagePadding * 2.0f,
-                        cellRect.height - imagePadding * 2.0f
+                        cellRect.x + imagePaddingX,
+                        cellRect.y + imagePaddingY,
+                        cellRect.width - imagePaddingX * 2.0f,
+                        cellRect.height - imagePaddingY * 2.0f
                     };
 
                     DrawRectangleLines((int)cellRect.x, (int)cellRect.y, (int)cellRect.width, (int)cellRect.height, GRAY);
 
                     if (boardCharacterTextures[i].id != 0) {
+                        float imageWidthOnScreen = imageRect.width * virtualScaleX;
+                        float imageHeightOnScreen = imageRect.height * virtualScaleY;
+                        float squareSizeOnScreen =
+                            (imageWidthOnScreen < imageHeightOnScreen) ?
+                                imageWidthOnScreen :
+                                imageHeightOnScreen;
+                        Rectangle squareRect = {
+                            imageRect.x + (imageRect.width - squareSizeOnScreen / virtualScaleX) * 0.5f,
+                            imageRect.y + (imageRect.height - squareSizeOnScreen / virtualScaleY) * 0.5f,
+                            squareSizeOnScreen / virtualScaleX,
+                            squareSizeOnScreen / virtualScaleY
+                        };
                         Texture2D texture = boardCharacterTextures[i];
-                        float scaleX = imageRect.width / (float)texture.width;
-                        float scaleY = imageRect.height / (float)texture.height;
+                        float scaleX = squareRect.width / (float)texture.width;
+                        float scaleY = squareRect.height / (float)texture.height;
                         float scale = (scaleX < scaleY) ? scaleX : scaleY;
                         float drawWidth = (float)texture.width * scale;
                         float drawHeight = (float)texture.height * scale;
                         Rectangle drawRect = {
-                            imageRect.x + (imageRect.width - drawWidth) * 0.5f,
-                            imageRect.y + (imageRect.height - drawHeight) * 0.5f,
+                            squareRect.x + (squareRect.width - drawWidth) * 0.5f,
+                            squareRect.y + (squareRect.height - drawHeight) * 0.5f,
                             drawWidth,
                             drawHeight
                         };
@@ -621,12 +671,12 @@ int main(void) {
                     }
                 }
 
-                EndDrawing();
+                endVirtualFrame();
                 break;
             }
 
             case GAME_STATE_PLAYER_WINS: {
-                BeginDrawing();
+                beginVirtualFrame();
                 ClearBackground(RAYWHITE);
 
                 DrawText(
@@ -651,7 +701,7 @@ int main(void) {
                     GRAY
                 );
 
-                EndDrawing();
+                endVirtualFrame();
 
                 if (IsKeyPressed(KEY_ESCAPE)) {
                     pthread_mutex_lock(&mutex);
@@ -662,7 +712,7 @@ int main(void) {
             }
 
             case GAME_STATE_LLM_WINS: {
-                BeginDrawing();
+                beginVirtualFrame();
                 ClearBackground(RAYWHITE);
 
                 DrawText(
@@ -687,7 +737,7 @@ int main(void) {
                     GRAY
                 );
 
-                EndDrawing();
+                endVirtualFrame();
 
                 if (IsKeyPressed(KEY_ESCAPE)) {
                     pthread_mutex_lock(&mutex);
