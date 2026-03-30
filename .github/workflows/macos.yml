@@ -48,11 +48,12 @@ jobs:
 
       - name: Package
         run: |
-          mkdir -p dist
-          cp guess_llama dist/
-          cp README.md dist/
-          cp LICENSE dist/
-          tar -czf guess_llama-macos.tar.gz -C dist .
+          package_dir="package_root/guess_llama/macos"
+          mkdir -p "$package_dir"
+          cp guess_llama "$package_dir"/
+          cp README.md "$package_dir"/
+          cp LICENSE "$package_dir"/
+          tar -czf guess_llama-macos.tar.gz -C package_root guess_llama
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

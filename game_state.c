@@ -74,7 +74,144 @@ static const char* getEnvOrDefault(const char* name, const char* fallback) {
     return value;
 }
 
+static char* trimWhitespace(char* text) {
+    char* end;
+
+    if (text == NULL) {
+        return NULL;
+    }
+
+    while (*text != '\0' && isspace((unsigned char)*text)) {
+        ++text;
+    }
+
+    if (*text == '\0') {
+        return text;
+    }
+
+    end = text + strlen(text) - 1;
+    while (end > text && isspace((unsigned char)*end)) {
+        *end = '\0';
+        --end;
+    }
+
+    return text;
+}
+
+static bool isValidEnvKey(const char* key) {
+    if (key == NULL || key[0] == '\0') {
+        return false;
+    }
+
+    if (!(isalpha((unsigned char)key[0]) || key[0] == '_')) {
+        return false;
+    }
+
+    for (const char* cursor = key + 1; *cursor != '\0'; ++cursor) {
+        if (!(isalnum((unsigned char)*cursor) || *cursor == '_')) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static void stripOuterQuotes(char* value) {
+    size_t length;
+
+    if (value == NULL) {
+        return;
+    }
+
+    length = strlen(value);
+    if (length < 2) {
+        return;
+    }
+
+    if ((value[0] == '"' && value[length - 1] == '"') || (value[0] == '\'' && value[length - 1] == '\'')) {
+        memmove(value, value + 1, length - 2);
+        value[length - 2] = '\0';
+    }
+}
+
+static int setEnvIfAllowed(const char* key, const char* value, int overwrite) {
+#ifdef _WIN32
+    if (!overwrite && getenv(key) != NULL) {
+        return 0;
+    }
+    return _putenv_s(key, value);
+#else
+    return setenv(key, value, overwrite);
+#endif
+}
+
+static void loadDotEnvFile(const char* filepath) {
+    FILE* file = fopen(filepath, "r");
+    char line[4096];
+    int lineNumber = 0;
+
+    if (file == NULL) {
+        return;
+    }
+
+    while (fgets(line, sizeof(line), file) != NULL) {
+        char* parsedLine;
+        char* equals;
+        char* key;
+        char* value;
+        size_t lineLength;
+
+        ++lineNumber;
+        lineLength = strlen(line);
+
+        if (lineLength == sizeof(line) - 1 && line[lineLength - 1] != '\n') {
+            int c;
+            while ((c = fgetc(file)) != '\n' && c != EOF) {
+            }
+        }
+
+        while (lineLength > 0 && (line[lineLength - 1] == '\n' || line[lineLength - 1] == '\r')) {
+            line[--lineLength] = '\0';
+        }
+
+        parsedLine = trimWhitespace(line);
+        if (parsedLine[0] == '\0' || parsedLine[0] == '#') {
+            continue;
+        }
+
+        if (strncmp(parsedLine, "export", 6) == 0 && isspace((unsigned char)parsedLine[6])) {
+            parsedLine = trimWhitespace(parsedLine + 6);
+        }
+
+        equals = strchr(parsedLine, '=');
+        if (equals == NULL) {
+            fprintf(stderr, "Skipping invalid .env line %d in %s (missing '=')\n", lineNumber, filepath);
+            continue;
+        }
+
+        *equals = '\0';
+        key = trimWhitespace(parsedLine);
+        value = trimWhitespace(equals + 1);
+
+        if (!isValidEnvKey(key)) {
+            fprintf(stderr, "Skipping invalid .env key '%s' in %s line %d\n", key, filepath, lineNumber);
+            continue;
+        }
+
+        stripOuterQuotes(value);
+
+        if (setEnvIfAllowed(key, value, 0) != 0) {
+            fprintf(stderr, "Failed to set environment variable '%s' from %s: %s\n", key, filepath, strerror(errno));
+        }
+    }
+
+    fclose(file);
+}
+
 void initRuntimeConfig(void) {
+    loadDotEnvFile(".env.local");
+    loadDotEnvFile(".env");
+
     username = getEnvOrDefault("GUESS_LLAMA_USERNAME", "username");
     server_url = getEnvOrDefault("GUESS_LLAMA_SERVER_URL", "localhost:1234");
     llmServerAddress = getEnvOrDefault("GUESS_LLAMA_LLM_SERVER", "http://localhost:9090");
