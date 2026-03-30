@@ -110,9 +110,12 @@ extern Texture2D playerCharacterTexture;
 extern Texture2D boardCharacterTextures[NUM_CHARACTERS];
 extern bool boardCharacterTexturesLoaded;
 
+extern RenderTexture2D virtualRenderTarget;
+
 extern const char* username;
 extern const char* server_url;
 extern const char* llmServerAddress;
+void initRuntimeConfig(void);
 
 char* filter_think_tags(const char* input_str);
 char* extract_json_from_markdown(const char* input_str);
@@ -186,6 +189,12 @@ extern bool llm_should_continue;
 
 bool loadPlayerCharacterTexture(void);
 bool loadBoardCharacterTextures(void);
+bool initVirtualRendering(void);
+void beginVirtualFrame(void);
+void endVirtualFrame(void);
+Vector2 getVirtualMousePosition(void);
+float getVirtualScaleX(void);
+float getVirtualScaleY(void);
 void freeGameResources(void);
 
 char* getPlayerQuestionYesNoAnswer(
