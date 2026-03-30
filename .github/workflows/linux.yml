@@ -16,10 +16,17 @@ on:
       - "Makefile"
       - ".github/workflows/build.yml"
   workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
 
 jobs:
   linux-build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -63,3 +70,25 @@ jobs:
         run: |
           make clean
           make
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp guess_llama dist/
+          cp README.md dist/
+          cp LICENSE dist/
+          tar -czf guess_llama-linux-x86_64.tar.gz -C dist .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: guess_llama-linux-x86_64
+          path: guess_llama-linux-x86_64.tar.gz
+
+      - name: Upload release asset
+        if: github.event_name == 'release' && github.event.action == 'published'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: guess_llama-linux-x86_64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
