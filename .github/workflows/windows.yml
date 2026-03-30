@@ -61,7 +61,7 @@ jobs:
           EXTRA_CFLAGS="$(pkg-config --cflags raylib jansson libcurl)"
           EXTRA_LIBS="$(pkg-config --libs raylib jansson libcurl)"
           make clean
-          make CC=gcc CFLAGS="-std=gnu11 -D_GNU_SOURCE -Wall -Wextra -g ${EXTRA_CFLAGS}" LIBS="${EXTRA_LIBS} -lpthread"
+          make CC=gcc CFLAGS="-std=gnu11 -D_GNU_SOURCE -DWIN32_LEAN_AND_MEAN -DNOGDI -DNOUSER -Wall -Wextra -g ${EXTRA_CFLAGS}" LIBS="${EXTRA_LIBS} -lpthread"
 
       - name: Package
         shell: msys2 {0}
