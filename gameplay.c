@@ -96,6 +96,248 @@ static void freeEliminationList(char** eliminationList, int eliminationCount) {
     free(eliminationList);
 }
 
+static char* normalizeYesNoAnswer(const char* answerText) {
+    const char* cursor = answerText;
+    char token[16] = {0};
+    int tokenLength = 0;
+
+    if (!answerText) {
+        return NULL;
+    }
+
+    while (*cursor != '\0' && isspace((unsigned char)*cursor)) {
+        ++cursor;
+    }
+
+    while (*cursor != '\0' && tokenLength < (int)sizeof(token) - 1) {
+        if (isalpha((unsigned char)*cursor)) {
+            token[tokenLength++] = (char)tolower((unsigned char)*cursor);
+        } else if (tokenLength > 0) {
+            break;
+        }
+        ++cursor;
+    }
+
+    token[tokenLength] = '\0';
+
+    if (strncmp(token, "yes", 3) == 0) {
+        return strdup("Yes");
+    }
+
+    if (strncmp(token, "no", 2) == 0) {
+        return strdup("No");
+    }
+
+    return NULL;
+}
+
+typedef struct {
+    char* theme;
+    char* question;
+    int llmCharacterIndex;
+    char* imageDirectoryPath;
+} PlayerQuestionThreadArgs;
+
+static void* playerQuestionThread(void* arg) {
+    PlayerQuestionThreadArgs* args = (PlayerQuestionThreadArgs*)arg;
+    char* answer = getPlayerQuestionYesNoAnswer(
+        args->theme,
+        args->question,
+        args->llmCharacterIndex,
+        args->imageDirectoryPath
+    );
+
+    pthread_mutex_lock(&mutex);
+    if (pending_player_answer) {
+        free(pending_player_answer);
+        pending_player_answer = NULL;
+    }
+    pending_player_answer = answer;
+    player_question_success = answer != NULL;
+    player_question_in_progress = false;
+    pthread_mutex_unlock(&mutex);
+
+    free(args->theme);
+    free(args->question);
+    free(args->imageDirectoryPath);
+    free(args);
+    return NULL;
+}
+
+bool startPlayerQuestionThread(
+    const char* theme,
+    const char* question,
+    int llmCharacterIndex,
+    const char* imageDirectory
+) {
+    PlayerQuestionThreadArgs* threadArgs = malloc(sizeof(PlayerQuestionThreadArgs));
+
+    if (!threadArgs) {
+        fprintf(stderr, "Failed to allocate player question thread args\n");
+        return false;
+    }
+
+    threadArgs->theme = strdup(theme);
+    threadArgs->question = strdup(question);
+    threadArgs->llmCharacterIndex = llmCharacterIndex;
+    threadArgs->imageDirectoryPath = strdup(imageDirectory);
+
+    if (!threadArgs->theme || !threadArgs->question || !threadArgs->imageDirectoryPath) {
+        fprintf(stderr, "Failed to allocate player question thread strings\n");
+        free(threadArgs->theme);
+        free(threadArgs->question);
+        free(threadArgs->imageDirectoryPath);
+        free(threadArgs);
+        return false;
+    }
+
+    if (player_question_thread_started) {
+        pthread_join(player_question_thread, NULL);
+        player_question_thread_started = false;
+    }
+
+    pthread_mutex_lock(&mutex);
+    if (pending_player_answer) {
+        free(pending_player_answer);
+        pending_player_answer = NULL;
+    }
+    player_question_in_progress = true;
+    player_question_success = false;
+    pthread_mutex_unlock(&mutex);
+
+    if (pthread_create(&player_question_thread, NULL, playerQuestionThread, threadArgs) != 0) {
+        fprintf(stderr, "Failed to create player question thread\n");
+        pthread_mutex_lock(&mutex);
+        player_question_in_progress = false;
+        pthread_mutex_unlock(&mutex);
+        free(threadArgs->theme);
+        free(threadArgs->question);
+        free(threadArgs->imageDirectoryPath);
+        free(threadArgs);
+        return false;
+    }
+
+    player_question_thread_started = true;
+    return true;
+}
+
+char* getPlayerQuestionYesNoAnswer(
+    const char* theme,
+    const char* question,
+    int llmCharacterIndex,
+    const char* imageDirectory
+) {
+    char llmCharacterImagePath[MAX_FILEPATH_BUFFER_SIZE];
+    const char* imagePaths[1];
+    int imageLabel = llmCharacterIndex + 1;
+    char* initialPrompt = NULL;
+    const char* finalPrompt =
+        "Answer this question about the shown character using only one word: yes or no. "
+        "Do not include punctuation or any additional words.";
+    char* llmResponse = NULL;
+    char* responseContent = NULL;
+    char* filteredContent = NULL;
+    char* normalizedAnswer = NULL;
+    json_error_t error;
+    json_t* root = NULL;
+    json_t* choices = NULL;
+    json_t* firstChoice = NULL;
+    json_t* message = NULL;
+    json_t* content = NULL;
+
+    snprintf(
+        llmCharacterImagePath,
+        sizeof(llmCharacterImagePath),
+        "%s/character_%d.png",
+        imageDirectory,
+        llmCharacterIndex + 1
+    );
+    imagePaths[0] = llmCharacterImagePath;
+
+    if (asprintf(
+            &initialPrompt,
+            "You are answering a player's Guess Who question for theme '%s'. "
+            "The player asked: '%s'. I am showing only your secret character image. "
+            "Return whether the statement is true for this character.",
+            theme,
+            question
+        ) == -1) {
+        fprintf(stderr, "Failed to build player question prompt\n");
+        return NULL;
+    }
+
+    llmResponse = getLLMResponseWithVision(
+        initialPrompt,
+        imagePaths,
+        1,
+        &imageLabel,
+        finalPrompt,
+        0.1
+    );
+    free(initialPrompt);
+
+    if (!llmResponse) {
+        fprintf(stderr, "Failed to get player question response from LLM\n");
+        return NULL;
+    }
+
+    root = json_loads(llmResponse, 0, &error);
+    if (!root) {
+        fprintf(stderr, "Error parsing LLM JSON response: %s\n", error.text);
+        goto cleanup;
+    }
+
+    choices = json_object_get(root, "choices");
+    if (!json_is_array(choices) || json_array_size(choices) == 0) {
+        fprintf(stderr, "Error: choices missing in player question response\n");
+        goto cleanup;
+    }
+
+    firstChoice = json_array_get(choices, 0);
+    if (!json_is_object(firstChoice)) {
+        fprintf(stderr, "Error: first choice missing in player question response\n");
+        goto cleanup;
+    }
+
+    message = json_object_get(firstChoice, "message");
+    if (!json_is_object(message)) {
+        fprintf(stderr, "Error: message missing in player question response\n");
+        goto cleanup;
+    }
+
+    content = json_object_get(message, "content");
+    if (!json_is_string(content)) {
+        fprintf(stderr, "Error: content missing in player question response\n");
+        goto cleanup;
+    }
+
+    responseContent = strdup(json_string_value(content));
+    if (!responseContent) {
+        fprintf(stderr, "Failed to allocate player response content\n");
+        goto cleanup;
+    }
+
+    filteredContent = filter_think_tags(responseContent);
+    if (!filteredContent) {
+        fprintf(stderr, "Failed to filter player response content\n");
+        goto cleanup;
+    }
+
+    normalizedAnswer = normalizeYesNoAnswer(filteredContent);
+    if (!normalizedAnswer) {
+        fprintf(stderr, "Could not normalize LLM yes/no response: %s\n", filteredContent);
+    }
+
+cleanup:
+    free(llmResponse);
+    free(responseContent);
+    free(filteredContent);
+    if (root) {
+        json_decref(root);
+    }
+    return normalizedAnswer;
+}
+
 static bool getSingleCandidateFromLLMPerspective(
     int llmCharacterIndex,
     const int* remainingCharacters,
@@ -922,22 +1164,7 @@ void llmGuessingRound(
                     llm_guess_success = false;
                     pthread_mutex_unlock(&mutex);
                     waiting_for_elimination = false;
-                    if (!startQuestionGenerationThread(
-                            llmCharacterIndex,
-                            theme,
-                            numCharacters,
-                            remainingCharacters,
-                            remainingCharacterCount,
-                            playerTexture,
-                            playerCharacterIndex,
-                            imageDirectory
-                        )) {
-                        pthread_mutex_lock(&mutex);
-                        currentGameState = GAME_STATE_PLAYING;
-                        pthread_mutex_unlock(&mutex);
-                        return;
-                    }
-                    waiting_for_question = true;
+                    return;
                 } else {
                     pthread_mutex_lock(&mutex);
                     currentGameState = GAME_STATE_PLAYING;
