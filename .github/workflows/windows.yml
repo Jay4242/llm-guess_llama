@@ -75,18 +75,22 @@ jobs:
           cp "$bin_name" dist/
           cp README.md dist/
           cp LICENSE dist/
-          tar -czf guess_llama-windows-ucrt64.tar.gz -C dist .
+
+      - name: Create zip archive
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/* -DestinationPath guess_llama-windows-ucrt64.zip -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: guess_llama-windows-ucrt64
-          path: guess_llama-windows-ucrt64.tar.gz
+          path: guess_llama-windows-ucrt64.zip
 
       - name: Upload release asset
         if: github.event_name == 'release' && github.event.action == 'published'
         uses: softprops/action-gh-release@v2
         with:
-          files: guess_llama-windows-ucrt64.tar.gz
+          files: guess_llama-windows-ucrt64.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
