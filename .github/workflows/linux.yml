@@ -69,12 +69,13 @@ jobs:
       - name: Build
         run: |
           make clean
-          make
+          make LDFLAGS="-Wl,-rpath,'\$\$ORIGIN'"
 
       - name: Package
         run: |
           mkdir -p dist
           cp guess_llama dist/
+          cp -a /usr/local/lib/libraylib.so* dist/
           cp README.md dist/
           cp LICENSE dist/
           tar -czf guess_llama-linux-x86_64.tar.gz -C dist .
