@@ -1,0 +1,69 @@
+name: macOS Build
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.c"
+      - "**/*.h"
+      - "Makefile"
+      - ".github/workflows/macos.yml"
+  pull_request:
+    paths:
+      - "**/*.c"
+      - "**/*.h"
+      - "Makefile"
+      - ".github/workflows/macos.yml"
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  macos-build:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install pkg-config raylib jansson curl
+
+      - name: Build
+        run: |
+          PKG_CONFIG_PATH="$(brew --prefix raylib)/lib/pkgconfig:$(brew --prefix jansson)/lib/pkgconfig:$(brew --prefix curl)/lib/pkgconfig"
+          export PKG_CONFIG_PATH
+          EXTRA_CFLAGS="$(pkg-config --cflags raylib jansson libcurl)"
+          EXTRA_LIBS="$(pkg-config --libs raylib jansson libcurl)"
+          make clean
+          make CC=clang CFLAGS="-std=gnu11 -D_GNU_SOURCE -Wall -Wextra -g ${EXTRA_CFLAGS}" LIBS="${EXTRA_LIBS} -lpthread"
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp guess_llama dist/
+          cp README.md dist/
+          cp LICENSE dist/
+          tar -czf guess_llama-macos.tar.gz -C dist .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: guess_llama-macos
+          path: guess_llama-macos.tar.gz
+
+      - name: Upload release asset
+        if: github.event_name == 'release' && github.event.action == 'published'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: guess_llama-macos.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
