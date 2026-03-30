@@ -190,6 +190,7 @@ extern bool llm_should_continue;
 bool loadPlayerCharacterTexture(void);
 bool loadBoardCharacterTextures(void);
 bool initVirtualRendering(void);
+void refreshVirtualViewport(void);
 void beginVirtualFrame(void);
 void endVirtualFrame(void);
 Vector2 getVirtualMousePosition(void);
