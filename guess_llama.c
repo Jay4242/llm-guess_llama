@@ -11,11 +11,25 @@ static void drawImageGenerationProgressScreen(void) {
 }
 
 int main(void) {
+    typedef enum {
+        PLAYER_TURN_PHASE_ASK_QUESTION,
+        PLAYER_TURN_PHASE_WAITING_FOR_ANSWER,
+        PLAYER_TURN_PHASE_ELIMINATION
+    } PlayerTurnPhase;
+
     char theme_input_buffer[100] = {0};
     bool themeInputSelected = false;
     Rectangle themeInputBox = {100, 100, 200, 30};
     Rectangle llmThemeButton = {320, 100, 200, 30};
     bool llmThemeSelected = false;
+    bool guessingRoundStarted = false;
+    bool playerTurnActive = false;
+    bool playerQuestionInputSelected = false;
+    bool playerQuestionRequestPending = false;
+    char playerQuestionInput[256] = {0};
+    char playerLastQuestion[256] = {0};
+    char playerLastAnswer[64] = {0};
+    PlayerTurnPhase playerTurnPhase = PLAYER_TURN_PHASE_ASK_QUESTION;
 
     srand((unsigned int)time(NULL));
 
@@ -221,6 +235,7 @@ int main(void) {
                     }
 
                     loadPlayerCharacterTexture();
+                    loadBoardCharacterTextures();
 
                     pthread_mutex_lock(&mutex);
                     currentGameState = GAME_STATE_PLAYING;
@@ -280,22 +295,63 @@ int main(void) {
 
             case GAME_STATE_PLAYING: {
                 Rectangle startGuessingButton = {10, 70, 250, 30};
+                Rectangle questionInputBox = {10, 44, 580, 34};
+                Rectangle submitQuestionButton = {600, 44, 190, 34};
+                Rectangle endTurnButton = {600, 44, 190, 34};
+                const int boardColumns = 6;
+                const int boardRows = NUM_CHARACTERS / boardColumns;
+                const float boardPadding = 10.0f;
+                const float boardOriginX = boardPadding;
+                const float boardOriginY =
+                    (playerTurnPhase == PLAYER_TURN_PHASE_ELIMINATION) ? 98.0f : 88.0f;
+                const float boardWidth = (float)SCREEN_WIDTH - boardPadding * 2.0f;
+                const float boardHeight = (float)SCREEN_HEIGHT - boardOriginY - boardPadding;
+                const float cellGap = 6.0f;
+                const float cellWidth =
+                    (boardWidth - cellGap * (float)(boardColumns - 1)) / (float)boardColumns;
+                const float cellHeight =
+                    (boardHeight - cellGap * (float)(boardRows - 1)) / (float)boardRows;
 
-                BeginDrawing();
-                ClearBackground(RAYWHITE);
+                if (!guessingRoundStarted) {
+                    BeginDrawing();
+                    ClearBackground(RAYWHITE);
 
-                DrawText(playerCharacterString, 10, 10, 20, BLACK);
-                DrawRectangleRec(startGuessingButton, BLUE);
-                DrawText(
-                    "Start Guessing Round",
-                    (int)startGuessingButton.x + 5,
-                    (int)startGuessingButton.y + 8,
-                    20,
-                    WHITE
-                );
+                    DrawRectangleRec(startGuessingButton, BLUE);
+                    DrawText(
+                        "Start Guessing Round",
+                        (int)startGuessingButton.x + 5,
+                        (int)startGuessingButton.y + 8,
+                        20,
+                        WHITE
+                    );
 
-                if (CheckCollisionPointRec(GetMousePosition(), startGuessingButton) &&
-                    IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                    EndDrawing();
+
+                    if (CheckCollisionPointRec(GetMousePosition(), startGuessingButton) &&
+                        IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                        llmGuessingRound(
+                            llmCharacter,
+                            selectedTheme,
+                            NUM_CHARACTERS,
+                            charactersRemaining,
+                            &remainingCount,
+                            playerCharacterTexture,
+                            playerCharacter,
+                            imageDirectoryPath
+                        );
+
+                        if (currentGameState == GAME_STATE_PLAYING) {
+                            guessingRoundStarted = true;
+                            playerTurnActive = true;
+                            playerTurnPhase = PLAYER_TURN_PHASE_ASK_QUESTION;
+                            playerQuestionInputSelected = false;
+                            playerQuestionInput[0] = '\0';
+                        }
+                    }
+                    break;
+                }
+
+                if (!playerTurnActive) {
                     llmGuessingRound(
                         llmCharacter,
                         selectedTheme,
@@ -306,6 +362,263 @@ int main(void) {
                         playerCharacter,
                         imageDirectoryPath
                     );
+
+                    if (currentGameState == GAME_STATE_PLAYING) {
+                        playerTurnActive = true;
+                        playerTurnPhase = PLAYER_TURN_PHASE_ASK_QUESTION;
+                        playerQuestionInputSelected = false;
+                        playerQuestionInput[0] = '\0';
+                    }
+                    break;
+                }
+
+                if (playerTurnPhase == PLAYER_TURN_PHASE_ASK_QUESTION &&
+                    IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                    playerQuestionInputSelected = CheckCollisionPointRec(GetMousePosition(), questionInputBox);
+                }
+
+                {
+                    int key = GetCharPressed();
+                    while (key > 0) {
+                        if (playerTurnPhase == PLAYER_TURN_PHASE_ASK_QUESTION && playerQuestionInputSelected) {
+                            int len = (int)strlen(playerQuestionInput);
+                            if (key >= 32 && key <= 125 && len < (int)sizeof(playerQuestionInput) - 1) {
+                                playerQuestionInput[len] = (char)key;
+                                playerQuestionInput[len + 1] = '\0';
+                            }
+                        }
+                        key = GetCharPressed();
+                    }
+                }
+
+                if (playerTurnPhase == PLAYER_TURN_PHASE_ASK_QUESTION &&
+                    IsKeyPressed(KEY_BACKSPACE) &&
+                    playerQuestionInputSelected) {
+                    int len = (int)strlen(playerQuestionInput);
+                    if (len > 0) {
+                        playerQuestionInput[len - 1] = '\0';
+                    }
+                }
+
+                if (playerTurnPhase == PLAYER_TURN_PHASE_ASK_QUESTION &&
+                    CheckCollisionPointRec(GetMousePosition(), submitQuestionButton) &&
+                    IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                    if (strlen(playerQuestionInput) > 0 && !playerQuestionRequestPending) {
+                        strncpy(playerLastQuestion, playerQuestionInput, sizeof(playerLastQuestion) - 1);
+                        playerLastQuestion[sizeof(playerLastQuestion) - 1] = '\0';
+                        snprintf(playerLastAnswer, sizeof(playerLastAnswer), "Waiting for LLM answer...");
+
+                        if (startPlayerQuestionThread(
+                                selectedTheme,
+                                playerQuestionInput,
+                                llmCharacter,
+                                imageDirectoryPath
+                            )) {
+                            playerQuestionRequestPending = true;
+                            playerTurnPhase = PLAYER_TURN_PHASE_WAITING_FOR_ANSWER;
+                        } else {
+                            snprintf(playerLastAnswer, sizeof(playerLastAnswer), "Failed to start request");
+                        }
+                    }
+                }
+
+                if (playerQuestionRequestPending) {
+                    bool requestInProgress;
+                    bool requestSuccess;
+                    char* answerToConsume = NULL;
+
+                    pthread_mutex_lock(&mutex);
+                    requestInProgress = player_question_in_progress;
+                    requestSuccess = player_question_success;
+                    if (!requestInProgress && pending_player_answer) {
+                        answerToConsume = pending_player_answer;
+                        pending_player_answer = NULL;
+                    }
+                    pthread_mutex_unlock(&mutex);
+
+                    if (!requestInProgress) {
+                        playerQuestionRequestPending = false;
+                        if (requestSuccess && answerToConsume) {
+                            strncpy(playerLastAnswer, answerToConsume, sizeof(playerLastAnswer) - 1);
+                            playerLastAnswer[sizeof(playerLastAnswer) - 1] = '\0';
+                            playerTurnPhase = PLAYER_TURN_PHASE_ELIMINATION;
+                        } else {
+                            snprintf(playerLastAnswer, sizeof(playerLastAnswer), "Could not parse yes/no");
+                            playerTurnPhase = PLAYER_TURN_PHASE_ASK_QUESTION;
+                        }
+                    }
+
+                    if (answerToConsume) {
+                        free(answerToConsume);
+                    }
+                }
+
+                if (playerTurnPhase == PLAYER_TURN_PHASE_ELIMINATION &&
+                    CheckCollisionPointRec(GetMousePosition(), endTurnButton) &&
+                    IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                    if (playerRemainingCount == 1 && playerCharacterActive[llmCharacter]) {
+                        pthread_mutex_lock(&mutex);
+                        currentGameState = GAME_STATE_PLAYER_WINS;
+                        pthread_mutex_unlock(&mutex);
+                    } else {
+                        playerTurnActive = false;
+                        playerTurnPhase = PLAYER_TURN_PHASE_ASK_QUESTION;
+                        playerQuestionInputSelected = false;
+                        playerQuestionInput[0] = '\0';
+                    }
+                }
+
+                if (playerTurnPhase == PLAYER_TURN_PHASE_ELIMINATION &&
+                    IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                    Vector2 mousePos = GetMousePosition();
+                    for (int i = 0; i < NUM_CHARACTERS; ++i) {
+                        int row = i / boardColumns;
+                        int col = i % boardColumns;
+                        Rectangle cellRect = {
+                            boardOriginX + (float)col * (cellWidth + cellGap),
+                            boardOriginY + (float)row * (cellHeight + cellGap),
+                            cellWidth,
+                            cellHeight
+                        };
+
+                        if (CheckCollisionPointRec(mousePos, cellRect)) {
+                            playerCharacterActive[i] = !playerCharacterActive[i];
+                            playerRemainingCount += playerCharacterActive[i] ? 1 : -1;
+                            break;
+                        }
+                    }
+                }
+
+                BeginDrawing();
+                ClearBackground(RAYWHITE);
+
+                DrawText("Player Turn", 10, 10, 24, BLACK);
+
+                {
+                    char remainingText[64];
+                    snprintf(remainingText, sizeof(remainingText), "Player candidates: %d", playerRemainingCount);
+                    DrawText(remainingText, 600, 12, 18, MAROON);
+                }
+
+                if (playerTurnPhase == PLAYER_TURN_PHASE_WAITING_FOR_ANSWER) {
+                    const char* waitingText = "Waiting for LLM answer...";
+                    int waitingTextWidth = MeasureText(waitingText, 34);
+                    DrawText(
+                        waitingText,
+                        (SCREEN_WIDTH - waitingTextWidth) / 2,
+                        SCREEN_HEIGHT / 2 - 18,
+                        34,
+                        DARKGRAY
+                    );
+                    if (playerLastQuestion[0] != '\0') {
+                        char questionLine[sizeof(playerLastQuestion) + sizeof("Question: ")];
+                        snprintf(questionLine, sizeof(questionLine), "Question: %s", playerLastQuestion);
+                        int questionLineWidth = MeasureText(questionLine, 20);
+                        DrawText(
+                            questionLine,
+                            (SCREEN_WIDTH - questionLineWidth) / 2,
+                            SCREEN_HEIGHT / 2 + 34,
+                            20,
+                            BLACK
+                        );
+                    }
+                    EndDrawing();
+                    break;
+                }
+
+                if (playerTurnPhase == PLAYER_TURN_PHASE_ASK_QUESTION) {
+                    DrawRectangleRec(questionInputBox, LIGHTGRAY);
+                    DrawText(
+                        (strlen(playerQuestionInput) > 0) ? playerQuestionInput : "Type your yes/no question here...",
+                        (int)questionInputBox.x + 8,
+                        (int)questionInputBox.y + 8,
+                        18,
+                        (strlen(playerQuestionInput) > 0) ? BLACK : GRAY
+                    );
+                    if (playerQuestionInputSelected) {
+                        DrawRectangleLines(
+                            (int)questionInputBox.x,
+                            (int)questionInputBox.y,
+                            (int)questionInputBox.width,
+                            (int)questionInputBox.height,
+                            BLUE
+                        );
+                    }
+
+                    DrawRectangleRec(submitQuestionButton, BLUE);
+                    DrawText("Ask LLM", (int)submitQuestionButton.x + 55, (int)submitQuestionButton.y + 8, 18, WHITE);
+                } else if (playerTurnPhase == PLAYER_TURN_PHASE_ELIMINATION) {
+                    DrawText("Question:", 10, 44, 18, DARKGRAY);
+                    DrawText(playerLastQuestion, 100, 44, 18, BLACK);
+                    DrawText("Answer:", 10, 68, 18, DARKGRAY);
+                    DrawText(playerLastAnswer, 100, 68, 18, BLACK);
+                    DrawRectangleRec(endTurnButton, DARKGREEN);
+                    DrawText("End Turn", (int)endTurnButton.x + 48, (int)endTurnButton.y + 8, 18, WHITE);
+                }
+
+                for (int i = 0; i < NUM_CHARACTERS; ++i) {
+                    int row = i / boardColumns;
+                    int col = i % boardColumns;
+                    Rectangle cellRect = {
+                        boardOriginX + (float)col * (cellWidth + cellGap),
+                        boardOriginY + (float)row * (cellHeight + cellGap),
+                        cellWidth,
+                        cellHeight
+                    };
+                    const float imagePadding = 4.0f;
+                    Rectangle imageRect = {
+                        cellRect.x + imagePadding,
+                        cellRect.y + imagePadding,
+                        cellRect.width - imagePadding * 2.0f,
+                        cellRect.height - imagePadding * 2.0f
+                    };
+
+                    DrawRectangleLines((int)cellRect.x, (int)cellRect.y, (int)cellRect.width, (int)cellRect.height, GRAY);
+
+                    if (boardCharacterTextures[i].id != 0) {
+                        Texture2D texture = boardCharacterTextures[i];
+                        float scaleX = imageRect.width / (float)texture.width;
+                        float scaleY = imageRect.height / (float)texture.height;
+                        float scale = (scaleX < scaleY) ? scaleX : scaleY;
+                        float drawWidth = (float)texture.width * scale;
+                        float drawHeight = (float)texture.height * scale;
+                        Rectangle drawRect = {
+                            imageRect.x + (imageRect.width - drawWidth) * 0.5f,
+                            imageRect.y + (imageRect.height - drawHeight) * 0.5f,
+                            drawWidth,
+                            drawHeight
+                        };
+
+                        DrawTexturePro(
+                            texture,
+                            (Rectangle){0, 0, (float)texture.width, (float)texture.height},
+                            drawRect,
+                            (Vector2){0},
+                            0.0f,
+                            WHITE
+                        );
+                    } else {
+                        DrawRectangleRec(imageRect, LIGHTGRAY);
+                        DrawText("No image", (int)imageRect.x + 8, (int)imageRect.y + 20, 14, DARKGRAY);
+                    }
+
+                    if (!playerCharacterActive[i]) {
+                        DrawRectangleRec(cellRect, (Color){25, 25, 25, 180});
+                        DrawLine(
+                            (int)cellRect.x + 6,
+                            (int)cellRect.y + 6,
+                            (int)(cellRect.x + cellRect.width - 6),
+                            (int)(cellRect.y + cellRect.height - 6),
+                            RED
+                        );
+                        DrawLine(
+                            (int)(cellRect.x + cellRect.width - 6),
+                            (int)cellRect.y + 6,
+                            (int)cellRect.x + 6,
+                            (int)(cellRect.y + cellRect.height - 6),
+                            RED
+                        );
+                    }
                 }
 
                 EndDrawing();
@@ -324,8 +637,8 @@ int main(void) {
                     GREEN
                 );
                 DrawText(
-                    "The LLM eliminated your character!",
-                    SCREEN_WIDTH / 2 - MeasureText("The LLM eliminated your character!", 20) / 2,
+                    "You found the hidden character.",
+                    SCREEN_WIDTH / 2 - MeasureText("You found the hidden character.", 20) / 2,
                     SCREEN_HEIGHT / 2 + 20,
                     20,
                     DARKGRAY

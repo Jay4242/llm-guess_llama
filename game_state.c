@@ -32,6 +32,12 @@ int pending_elimination_count = 0;
 bool llm_guess_success = false;
 bool llm_should_continue = true;
 
+pthread_t player_question_thread = (pthread_t)0;
+bool player_question_thread_started = false;
+bool player_question_in_progress = false;
+bool player_question_success = false;
+char* pending_player_answer = NULL;
+
 char formattedThemeName[256] = {0};
 char imageDirectoryPath[MAX_PATH_BUFFER_SIZE] = {0};
 bool confirm_regen_prompt_active = false;
@@ -45,8 +51,12 @@ int playerCharacter = -1;
 int llmCharacter = -1;
 int* charactersRemaining = NULL;
 int remainingCount = 0;
+bool playerCharacterActive[NUM_CHARACTERS] = {0};
+int playerRemainingCount = 0;
 
 Texture2D playerCharacterTexture = {0};
+Texture2D boardCharacterTextures[NUM_CHARACTERS] = {0};
+bool boardCharacterTexturesLoaded = false;
 
 const char* username = "username";
 const char* server_url = "localhost:1234";
@@ -81,7 +91,47 @@ bool loadPlayerCharacterTexture(void) {
     return true;
 }
 
+bool loadBoardCharacterTextures(void) {
+    bool allLoaded = true;
+
+    for (int i = 0; i < NUM_CHARACTERS; ++i) {
+        char imagePath[MAX_FILEPATH_BUFFER_SIZE];
+        Image characterImage;
+
+        snprintf(
+            imagePath,
+            sizeof(imagePath),
+            "%s/character_%d.png",
+            imageDirectoryPath,
+            i + 1
+        );
+
+        characterImage = LoadImage(imagePath);
+        if (characterImage.data == NULL) {
+            fprintf(stderr, "Failed to load board character image: %s\n", imagePath);
+            allLoaded = false;
+            continue;
+        }
+
+        if (boardCharacterTextures[i].id != 0) {
+            UnloadTexture(boardCharacterTextures[i]);
+            boardCharacterTextures[i].id = 0;
+        }
+
+        boardCharacterTextures[i] = LoadTextureFromImage(characterImage);
+        UnloadImage(characterImage);
+    }
+
+    boardCharacterTexturesLoaded = allLoaded;
+    return allLoaded;
+}
+
 void freeGameResources(void) {
+    if (player_question_thread_started) {
+        pthread_join(player_question_thread, NULL);
+        player_question_thread_started = false;
+    }
+
     if (selectedTheme) {
         free(selectedTheme);
         selectedTheme = NULL;
@@ -119,6 +169,16 @@ void freeGameResources(void) {
         playerCharacterTexture.id = 0;
     }
 
+    for (int i = 0; i < NUM_CHARACTERS; ++i) {
+        if (boardCharacterTextures[i].id != 0) {
+            UnloadTexture(boardCharacterTextures[i]);
+            boardCharacterTextures[i].id = 0;
+        }
+        playerCharacterActive[i] = false;
+    }
+    boardCharacterTexturesLoaded = false;
+    playerRemainingCount = 0;
+
     if (pending_llm_question) {
         free(pending_llm_question);
         pending_llm_question = NULL;
@@ -132,4 +192,11 @@ void freeGameResources(void) {
         pending_elimination_list = NULL;
         pending_elimination_count = 0;
     }
+
+    if (pending_player_answer) {
+        free(pending_player_answer);
+        pending_player_answer = NULL;
+    }
+    player_question_in_progress = false;
+    player_question_success = false;
 }

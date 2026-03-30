@@ -26,6 +26,18 @@ static void initializeRemainingCharacters(void) {
     }
 }
 
+static void initializePlayerRemainingCharacters(void) {
+    playerRemainingCount = NUM_CHARACTERS;
+    for (int i = 0; i < NUM_CHARACTERS; ++i) {
+        playerCharacterActive[i] = true;
+    }
+
+    if (playerCharacter >= 0 && playerCharacter < NUM_CHARACTERS) {
+        playerCharacterActive[playerCharacter] = false;
+        playerRemainingCount -= 1;
+    }
+}
+
 static bool assignPlayerAndOpponent(void) {
     playerCharacter = rand() % NUM_CHARACTERS;
     printf("\nYou are character number %d\n", playerCharacter + 1);
@@ -56,6 +68,8 @@ static bool assignPlayerAndOpponent(void) {
         markSetupFailed();
         return false;
     }
+
+    initializePlayerRemainingCharacters();
 
     return true;
 }
