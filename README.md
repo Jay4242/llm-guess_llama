@@ -62,7 +62,14 @@ gcc -std=gnu11 -D_GNU_SOURCE -Wall -Wextra -g \
 
 ## Configuration
 
-Runtime configuration is read from environment variables (with built-in defaults):
+Runtime configuration is read with this precedence (highest first):
+
+1. Existing process environment variables
+2. `.env.local`
+3. `.env`
+4. Built-in defaults
+
+Supported variables:
 
 - `GUESS_LLAMA_USERNAME` (default: `username`)
 - `GUESS_LLAMA_SERVER_URL` (default: `localhost:1234`)
@@ -75,6 +82,14 @@ export GUESS_LLAMA_USERNAME="your-name"
 export GUESS_LLAMA_SERVER_URL="127.0.0.1:1234"
 export GUESS_LLAMA_LLM_SERVER="http://127.0.0.1:9090"
 ./guess_llama
+```
+
+`.env` file example:
+
+```dotenv
+GUESS_LLAMA_USERNAME=your-name
+GUESS_LLAMA_SERVER_URL=127.0.0.1:1234
+GUESS_LLAMA_LLM_SERVER=http://127.0.0.1:9090
 ```
 
 PowerShell example:
