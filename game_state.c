@@ -134,24 +134,41 @@ static void stripOuterQuotes(char* value) {
     }
 }
 
+static int setEnvIfAllowed(const char* key, const char* value, int overwrite) {
+#ifdef _WIN32
+    if (!overwrite && getenv(key) != NULL) {
+        return 0;
+    }
+    return _putenv_s(key, value);
+#else
+    return setenv(key, value, overwrite);
+#endif
+}
+
 static void loadDotEnvFile(const char* filepath) {
     FILE* file = fopen(filepath, "r");
-    char* line = NULL;
-    size_t lineCapacity = 0;
-    ssize_t lineLength;
+    char line[4096];
     int lineNumber = 0;
 
     if (file == NULL) {
         return;
     }
 
-    while ((lineLength = getline(&line, &lineCapacity, file)) != -1) {
+    while (fgets(line, sizeof(line), file) != NULL) {
         char* parsedLine;
         char* equals;
         char* key;
         char* value;
+        size_t lineLength;
 
         ++lineNumber;
+        lineLength = strlen(line);
+
+        if (lineLength == sizeof(line) - 1 && line[lineLength - 1] != '\n') {
+            int c;
+            while ((c = fgetc(file)) != '\n' && c != EOF) {
+            }
+        }
 
         while (lineLength > 0 && (line[lineLength - 1] == '\n' || line[lineLength - 1] == '\r')) {
             line[--lineLength] = '\0';
@@ -183,12 +200,11 @@ static void loadDotEnvFile(const char* filepath) {
 
         stripOuterQuotes(value);
 
-        if (setenv(key, value, 0) != 0) {
+        if (setEnvIfAllowed(key, value, 0) != 0) {
             fprintf(stderr, "Failed to set environment variable '%s' from %s: %s\n", key, filepath, strerror(errno));
         }
     }
 
-    free(line);
     fclose(file);
 }
 
