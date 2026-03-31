@@ -4,7 +4,6 @@
 
 This project is a C version of "Guess Who?" built with Raylib, libcurl, Jansson, and pthreads. It uses an LLM to generate themes and character traits, then uses a `stable-diffusion.cpp` server to create the character art the LLM reasons over during play.
 
-The codebase was refactored out of a single large `guess_llama.c` into smaller translation units so the gameplay loop, setup flow, persistence, LLM calls, and Stable Diffusion backend logic are easier to work on independently.
 
 ## Screenshot
 
