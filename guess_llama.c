@@ -598,8 +598,13 @@ int main(void) {
                     !zoomClickConsumed &&
                     leftClickReleasedForActions) {
                     if (hoveredCharacterIndex >= 0) {
-                        playerCharacterActive[hoveredCharacterIndex] = !playerCharacterActive[hoveredCharacterIndex];
-                        playerRemainingCount += playerCharacterActive[hoveredCharacterIndex] ? 1 : -1;
+                        if (!(hoveredCharacterIndex == playerCharacter &&
+                              !playerCharacterActive[hoveredCharacterIndex])) {
+                            playerCharacterActive[hoveredCharacterIndex] =
+                                !playerCharacterActive[hoveredCharacterIndex];
+                            playerRemainingCount +=
+                                playerCharacterActive[hoveredCharacterIndex] ? 1 : -1;
+                        }
                     }
                 }
 
