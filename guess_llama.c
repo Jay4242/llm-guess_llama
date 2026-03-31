@@ -42,6 +42,29 @@ static void drawSquareCroppedTexture(Texture2D texture, Rectangle targetRect, fl
     DrawTexturePro(texture, srcRect, drawRect, (Vector2){0}, 0.0f, WHITE);
 }
 
+static bool getSinglePlayerCandidate(int* candidateIndex) {
+    int activeCount = 0;
+    int activeCharacter = -1;
+
+    for (int i = 0; i < NUM_CHARACTERS; ++i) {
+        if (!playerCharacterActive[i]) {
+            continue;
+        }
+
+        activeCharacter = i;
+        ++activeCount;
+        if (activeCount > 1) {
+            break;
+        }
+    }
+
+    if (candidateIndex) {
+        *candidateIndex = (activeCount == 1) ? activeCharacter : -1;
+    }
+
+    return activeCount == 1;
+}
+
 int main(void) {
     typedef enum {
         PLAYER_TURN_PHASE_ASK_QUESTION,
@@ -582,7 +605,8 @@ int main(void) {
                     !zoomClickConsumed &&
                     CheckCollisionPointRec(getVirtualMousePosition(), endTurnButton) &&
                     leftClickReleasedForActions) {
-                    if (playerRemainingCount == 1 && playerCharacterActive[llmCharacter]) {
+                    int singleCandidate = -1;
+                    if (getSinglePlayerCandidate(&singleCandidate) && singleCandidate == llmCharacter) {
                         pthread_mutex_lock(&mutex);
                         currentGameState = GAME_STATE_PLAYER_WINS;
                         pthread_mutex_unlock(&mutex);
