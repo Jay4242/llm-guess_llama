@@ -43,6 +43,7 @@ static bool assignPlayerAndOpponent(void) {
     printf("\nYou are character number %d\n", playerCharacter + 1);
 
     pthread_mutex_lock(&mutex);
+    gameOverReasonText[0] = '\0';
     snprintf(
         playerCharacterString,
         sizeof(playerCharacterString),

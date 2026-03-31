@@ -59,6 +59,7 @@ extern int currentAnswer;
 extern char characterSelectionText[256];
 extern char playerCharacterString[256];
 extern char current_percent[16];
+extern char gameOverReasonText[128];
 
 extern pthread_mutex_t mutex;
 extern pthread_cond_t regen_cond;

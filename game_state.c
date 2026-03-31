@@ -8,6 +8,7 @@ int currentAnswer = -1;
 char characterSelectionText[256] = {0};
 char playerCharacterString[256] = {0};
 char current_percent[16] = {0};
+char gameOverReasonText[128] = {0};
 
 pthread_mutex_t mutex;
 pthread_cond_t regen_cond;
