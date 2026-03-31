@@ -29,6 +29,7 @@ static char* perform_json_post(const char* url, const char* data, long timeout_s
     CURLcode res;
     ResponseData response = {NULL, 0};
     struct curl_slist* headers = NULL;
+    char* authHeader = NULL;
 
     if (!curl) {
         fprintf(stderr, "curl_easy_init() failed\n");
@@ -40,6 +41,28 @@ static char* perform_json_post(const char* url, const char* data, long timeout_s
         fprintf(stderr, "Failed to allocate curl headers\n");
         curl_easy_cleanup(curl);
         return NULL;
+    }
+
+    if (llmApiKey && llmApiKey[0] != '\0') {
+        struct curl_slist* updatedHeaders;
+
+        if (asprintf(&authHeader, "Authorization: Bearer %s", llmApiKey) == -1) {
+            fprintf(stderr, "Failed to construct authorization header\n");
+            curl_slist_free_all(headers);
+            curl_easy_cleanup(curl);
+            return NULL;
+        }
+
+        updatedHeaders = curl_slist_append(headers, authHeader);
+        if (!updatedHeaders) {
+            fprintf(stderr, "Failed to allocate curl authorization header\n");
+            curl_slist_free_all(headers);
+            free(authHeader);
+            curl_easy_cleanup(curl);
+            return NULL;
+        }
+
+        headers = updatedHeaders;
     }
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -60,6 +83,7 @@ static char* perform_json_post(const char* url, const char* data, long timeout_s
 
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
+    free(authHeader);
     return response.data;
 }
 
@@ -385,7 +409,7 @@ char* getLLMResponse(const char* prompt, double temperature) {
     }
     user_message = NULL;
 
-    if (json_object_set_new(payload, "model", json_string("llama-3.2-3b-it-q8_0")) < 0) {
+    if (json_object_set_new(payload, "model", json_string(llmModel)) < 0) {
         fprintf(stderr, "Failed to construct JSON payload\n");
         goto cleanup;
     }
@@ -530,7 +554,7 @@ char* getLLMResponseWithVision(
     }
     user_message = NULL;
 
-    if (json_object_set_new(payload, "model", json_string("llama-3.2-3b-it-q8_0")) < 0) {
+    if (json_object_set_new(payload, "model", json_string(llmModel)) < 0) {
         fprintf(stderr, "Failed to construct vision payload\n");
         goto cleanup;
     }
