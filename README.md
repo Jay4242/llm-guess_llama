@@ -10,6 +10,7 @@ The codebase was refactored out of a single large `guess_llama.c` into smaller t
 
 ![Guess Llama gameplay screenshot](game_screenshot.png)
 ![Guess Llama player turn screenshot](game_screenshot_player_turn.png)
+![Guess Llama player turn zoomed screenshot](game_screenshot_player_turn_zoomed.png)
 
 ## Project Layout
 
