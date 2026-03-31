@@ -113,7 +113,6 @@ extern bool boardCharacterTexturesLoaded;
 
 extern RenderTexture2D virtualRenderTarget;
 
-extern const char* username;
 extern const char* server_url;
 extern const char* llmServerAddress;
 extern const char* llmApiKey;
