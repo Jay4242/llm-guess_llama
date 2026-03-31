@@ -876,6 +876,9 @@ int main(void) {
                 beginVirtualFrame();
                 ClearBackground(RAYWHITE);
 
+                const char* playerWinDetail =
+                    gameOverReasonText[0] != '\0' ? gameOverReasonText : "You found the hidden character.";
+
                 DrawText(
                     "YOU WIN!",
                     SCREEN_WIDTH / 2 - MeasureText("YOU WIN!", 40) / 2,
@@ -884,25 +887,16 @@ int main(void) {
                     GREEN
                 );
                 DrawText(
-                    "You found the hidden character.",
-                    SCREEN_WIDTH / 2 - MeasureText("You found the hidden character.", 20) / 2,
+                    playerWinDetail,
+                    SCREEN_WIDTH / 2 - MeasureText(playerWinDetail, 20) / 2,
                     SCREEN_HEIGHT / 2 + 20,
                     20,
                     DARKGRAY
                 );
-                if (gameOverReasonText[0] != '\0') {
-                    DrawText(
-                        gameOverReasonText,
-                        SCREEN_WIDTH / 2 - MeasureText(gameOverReasonText, 20) / 2,
-                        SCREEN_HEIGHT / 2 + 45,
-                        20,
-                        DARKGRAY
-                    );
-                }
                 DrawText(
                     "Press ESC to exit",
                     SCREEN_WIDTH / 2 - MeasureText("Press ESC to exit", 20) / 2,
-                    SCREEN_HEIGHT / 2 + 75,
+                    SCREEN_HEIGHT / 2 + 55,
                     20,
                     GRAY
                 );
@@ -921,6 +915,9 @@ int main(void) {
                 beginVirtualFrame();
                 ClearBackground(RAYWHITE);
 
+                const char* llmWinDetail =
+                    gameOverReasonText[0] != '\0' ? gameOverReasonText : "The LLM guessed your character!";
+
                 DrawText(
                     "LLM WINS!",
                     SCREEN_WIDTH / 2 - MeasureText("LLM WINS!", 40) / 2,
@@ -929,25 +926,16 @@ int main(void) {
                     RED
                 );
                 DrawText(
-                    "The LLM guessed your character!",
-                    SCREEN_WIDTH / 2 - MeasureText("The LLM guessed your character!", 20) / 2,
+                    llmWinDetail,
+                    SCREEN_WIDTH / 2 - MeasureText(llmWinDetail, 20) / 2,
                     SCREEN_HEIGHT / 2 + 20,
                     20,
                     DARKGRAY
                 );
-                if (gameOverReasonText[0] != '\0') {
-                    DrawText(
-                        gameOverReasonText,
-                        SCREEN_WIDTH / 2 - MeasureText(gameOverReasonText, 20) / 2,
-                        SCREEN_HEIGHT / 2 + 45,
-                        20,
-                        DARKGRAY
-                    );
-                }
                 DrawText(
                     "Press ESC to exit",
                     SCREEN_WIDTH / 2 - MeasureText("Press ESC to exit", 20) / 2,
-                    SCREEN_HEIGHT / 2 + 75,
+                    SCREEN_HEIGHT / 2 + 55,
                     20,
                     GRAY
                 );
