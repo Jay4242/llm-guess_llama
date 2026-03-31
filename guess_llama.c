@@ -10,6 +10,38 @@ static void drawImageGenerationProgressScreen(void) {
     endVirtualFrame();
 }
 
+static void drawSquareCroppedTexture(Texture2D texture, Rectangle targetRect, float virtualScaleX, float virtualScaleY) {
+    if (texture.id == 0) {
+        return;
+    }
+
+    float targetWidthOnScreen = targetRect.width * virtualScaleX;
+    float targetHeightOnScreen = targetRect.height * virtualScaleY;
+    float squareSizeOnScreen =
+        (targetWidthOnScreen < targetHeightOnScreen) ? targetWidthOnScreen : targetHeightOnScreen;
+    Rectangle squareRect = {
+        targetRect.x + (targetRect.width - squareSizeOnScreen / virtualScaleX) * 0.5f,
+        targetRect.y + (targetRect.height - squareSizeOnScreen / virtualScaleY) * 0.5f,
+        squareSizeOnScreen / virtualScaleX,
+        squareSizeOnScreen / virtualScaleY
+    };
+    float sourceSize = (texture.width < texture.height) ? (float)texture.width : (float)texture.height;
+    Rectangle srcRect = {
+        ((float)texture.width - sourceSize) * 0.5f,
+        ((float)texture.height - sourceSize) * 0.5f,
+        sourceSize,
+        sourceSize
+    };
+    Rectangle drawRect = {
+        (float)((int)(squareRect.x * virtualScaleX + 0.5f)) / virtualScaleX,
+        (float)((int)(squareRect.y * virtualScaleY + 0.5f)) / virtualScaleY,
+        (float)((int)(squareRect.width * virtualScaleX + 0.5f)) / virtualScaleX,
+        (float)((int)(squareRect.height * virtualScaleY + 0.5f)) / virtualScaleY
+    };
+
+    DrawTexturePro(texture, srcRect, drawRect, (Vector2){0}, 0.0f, WHITE);
+}
+
 int main(void) {
     typedef enum {
         PLAYER_TURN_PHASE_ASK_QUESTION,
@@ -30,6 +62,7 @@ int main(void) {
     char playerLastQuestion[256] = {0};
     char playerLastAnswer[64] = {0};
     PlayerTurnPhase playerTurnPhase = PLAYER_TURN_PHASE_ASK_QUESTION;
+    int zoomedCharacterIndex = -1;
 
     initRuntimeConfig();
     srand((unsigned int)time(NULL));
@@ -347,6 +380,24 @@ int main(void) {
                     cellHeight * (float)boardRows + cellGap * (float)(boardRows - 1);
                 const float gridOriginX = boardOriginX + (boardWidth - gridWidth) * 0.5f;
                 const float gridOriginY = boardOriginY + (boardHeight - gridHeight) * 0.5f;
+                const Vector2 mousePos = getVirtualMousePosition();
+                int hoveredCharacterIndex = -1;
+
+                for (int i = 0; i < NUM_CHARACTERS; ++i) {
+                    int row = i / boardColumns;
+                    int col = i % boardColumns;
+                    Rectangle cellRect = {
+                        gridOriginX + (float)col * (cellWidth + cellGap),
+                        gridOriginY + (float)row * (cellHeight + cellGap),
+                        cellWidth,
+                        cellHeight
+                    };
+
+                    if (CheckCollisionPointRec(mousePos, cellRect)) {
+                        hoveredCharacterIndex = i;
+                        break;
+                    }
+                }
 
                 if (!guessingRoundStarted) {
                     beginVirtualFrame();
@@ -408,7 +459,24 @@ int main(void) {
                     break;
                 }
 
+                const bool leftClickStarted = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+                const bool rightClickStarted = IsMouseButtonPressed(MOUSE_BUTTON_RIGHT);
+                const bool leftClickReleased = IsMouseButtonReleased(MOUSE_BUTTON_LEFT);
+                const bool rightClickReleased = IsMouseButtonReleased(MOUSE_BUTTON_RIGHT);
+                bool zoomClickConsumed = false;
+
+                if (zoomedCharacterIndex >= 0 &&
+                    (leftClickStarted || rightClickStarted || leftClickReleased || rightClickReleased)) {
+                    zoomedCharacterIndex = -1;
+                    zoomClickConsumed = true;
+                } else if (rightClickReleased && hoveredCharacterIndex >= 0 &&
+                           boardCharacterTextures[hoveredCharacterIndex].id != 0) {
+                    zoomedCharacterIndex = hoveredCharacterIndex;
+                    zoomClickConsumed = true;
+                }
+
                 if (playerTurnPhase == PLAYER_TURN_PHASE_ASK_QUESTION &&
+                    !zoomClickConsumed &&
                     IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                     playerQuestionInputSelected =
                         CheckCollisionPointRec(getVirtualMousePosition(), questionInputBox);
@@ -438,6 +506,7 @@ int main(void) {
                 }
 
                 if (playerTurnPhase == PLAYER_TURN_PHASE_ASK_QUESTION &&
+                    !zoomClickConsumed &&
                     CheckCollisionPointRec(getVirtualMousePosition(), submitQuestionButton) &&
                     IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
                     if (strlen(playerQuestionInput) > 0 && !playerQuestionRequestPending) {
@@ -491,6 +560,7 @@ int main(void) {
                 }
 
                 if (playerTurnPhase == PLAYER_TURN_PHASE_ELIMINATION &&
+                    !zoomClickConsumed &&
                     CheckCollisionPointRec(getVirtualMousePosition(), endTurnButton) &&
                     IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
                     if (playerRemainingCount == 1 && playerCharacterActive[llmCharacter]) {
@@ -506,23 +576,11 @@ int main(void) {
                 }
 
                 if (playerTurnPhase == PLAYER_TURN_PHASE_ELIMINATION &&
+                    !zoomClickConsumed &&
                     IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-                    Vector2 mousePos = getVirtualMousePosition();
-                    for (int i = 0; i < NUM_CHARACTERS; ++i) {
-                        int row = i / boardColumns;
-                        int col = i % boardColumns;
-                        Rectangle cellRect = {
-                            gridOriginX + (float)col * (cellWidth + cellGap),
-                            gridOriginY + (float)row * (cellHeight + cellGap),
-                            cellWidth,
-                            cellHeight
-                        };
-
-                        if (CheckCollisionPointRec(mousePos, cellRect)) {
-                            playerCharacterActive[i] = !playerCharacterActive[i];
-                            playerRemainingCount += playerCharacterActive[i] ? 1 : -1;
-                            break;
-                        }
+                    if (hoveredCharacterIndex >= 0) {
+                        playerCharacterActive[hoveredCharacterIndex] = !playerCharacterActive[hoveredCharacterIndex];
+                        playerRemainingCount += playerCharacterActive[hoveredCharacterIndex] ? 1 : -1;
                     }
                 }
 
@@ -616,42 +674,7 @@ int main(void) {
                     DrawRectangleLines((int)cellRect.x, (int)cellRect.y, (int)cellRect.width, (int)cellRect.height, GRAY);
 
                     if (boardCharacterTextures[i].id != 0) {
-                        float imageWidthOnScreen = imageRect.width * virtualScaleX;
-                        float imageHeightOnScreen = imageRect.height * virtualScaleY;
-                        float squareSizeOnScreen =
-                            (imageWidthOnScreen < imageHeightOnScreen) ?
-                                imageWidthOnScreen :
-                                imageHeightOnScreen;
-                        Rectangle squareRect = {
-                            imageRect.x + (imageRect.width - squareSizeOnScreen / virtualScaleX) * 0.5f,
-                            imageRect.y + (imageRect.height - squareSizeOnScreen / virtualScaleY) * 0.5f,
-                            squareSizeOnScreen / virtualScaleX,
-                            squareSizeOnScreen / virtualScaleY
-                        };
-                        Texture2D texture = boardCharacterTextures[i];
-                        float sourceSize =
-                            (texture.width < texture.height) ? (float)texture.width : (float)texture.height;
-                        Rectangle srcRect = {
-                            ((float)texture.width - sourceSize) * 0.5f,
-                            ((float)texture.height - sourceSize) * 0.5f,
-                            sourceSize,
-                            sourceSize
-                        };
-                        Rectangle drawRect = {
-                            (float)((int)(squareRect.x * virtualScaleX + 0.5f)) / virtualScaleX,
-                            (float)((int)(squareRect.y * virtualScaleY + 0.5f)) / virtualScaleY,
-                            (float)((int)(squareRect.width * virtualScaleX + 0.5f)) / virtualScaleX,
-                            (float)((int)(squareRect.height * virtualScaleY + 0.5f)) / virtualScaleY
-                        };
-
-                        DrawTexturePro(
-                            texture,
-                            srcRect,
-                            drawRect,
-                            (Vector2){0},
-                            0.0f,
-                            WHITE
-                        );
+                        drawSquareCroppedTexture(boardCharacterTextures[i], imageRect, virtualScaleX, virtualScaleY);
                     } else {
                         DrawRectangleRec(imageRect, LIGHTGRAY);
                         DrawText("No image", (int)imageRect.x + 8, (int)imageRect.y + 20, 14, DARKGRAY);
@@ -674,6 +697,47 @@ int main(void) {
                             RED
                         );
                     }
+                }
+
+                if (zoomedCharacterIndex >= 0 && boardCharacterTextures[zoomedCharacterIndex].id != 0) {
+                    const float previewBackdropAlpha = 95.0f;
+                    const float previewPanelMaxWidth = SCREEN_WIDTH * 0.52f;
+                    const float previewPanelMaxHeight = SCREEN_HEIGHT * 0.72f;
+                    const float previewPanelSize =
+                        (previewPanelMaxWidth < previewPanelMaxHeight) ?
+                            previewPanelMaxWidth :
+                            previewPanelMaxHeight;
+                    Rectangle previewPanelRect = {
+                        ((float)SCREEN_WIDTH - previewPanelSize) * 0.5f,
+                        ((float)SCREEN_HEIGHT - previewPanelSize) * 0.5f,
+                        previewPanelSize,
+                        previewPanelSize
+                    };
+                    Rectangle previewImageRect = {
+                        previewPanelRect.x + 14.0f,
+                        previewPanelRect.y + 14.0f,
+                        previewPanelRect.width - 28.0f,
+                        previewPanelRect.height - 28.0f
+                    };
+                    char previewLabel[40];
+                    snprintf(previewLabel, sizeof(previewLabel), "Character %d", zoomedCharacterIndex + 1);
+
+                    DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, (Color){0, 0, 0, (unsigned char)previewBackdropAlpha});
+                    DrawRectangleRec(previewPanelRect, (Color){245, 245, 245, 255});
+                    DrawRectangleLinesEx(previewPanelRect, 2.0f, BLACK);
+                    drawSquareCroppedTexture(
+                        boardCharacterTextures[zoomedCharacterIndex],
+                        previewImageRect,
+                        virtualScaleX,
+                        virtualScaleY
+                    );
+                    DrawText(
+                        previewLabel,
+                        (int)(previewPanelRect.x + previewPanelRect.width * 0.5f) - MeasureText(previewLabel, 22) / 2,
+                        (int)previewPanelRect.y - 28,
+                        22,
+                        BLACK
+                    );
                 }
 
                 endVirtualFrame();
