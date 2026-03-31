@@ -306,15 +306,16 @@ int main(void) {
                 }
 
                 DrawText(
-                    "Press SPACE to continue...",
-                    SCREEN_WIDTH / 2 - MeasureText("Press SPACE to continue...", 20) / 2,
+                    "Press SPACE or ENTER to continue...",
+                    SCREEN_WIDTH / 2 - MeasureText("Press SPACE or ENTER to continue...", 20) / 2,
                     SCREEN_HEIGHT / 2 + 50,
                     20,
                     GRAY
                 );
                 endVirtualFrame();
 
-                if (IsKeyPressed(KEY_SPACE) && !setup_in_progress) {
+                bool continuePressed = IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER);
+                if (continuePressed && !setup_in_progress) {
                     SetupThreadArgs* args = malloc(sizeof(SetupThreadArgs));
                     if (!args) {
                         fprintf(stderr, "Failed to allocate memory for setup thread args.\n");
