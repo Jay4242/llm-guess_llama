@@ -115,6 +115,8 @@ extern RenderTexture2D virtualRenderTarget;
 extern const char* username;
 extern const char* server_url;
 extern const char* llmServerAddress;
+extern const char* llmApiKey;
+extern const char* llmModel;
 void initRuntimeConfig(void);
 
 char* filter_think_tags(const char* input_str);
