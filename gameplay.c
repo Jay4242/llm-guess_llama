@@ -128,6 +128,23 @@ static void drawCenteredPlayerTexture(Texture2D playerTexture, float centerX, fl
     );
 }
 
+static float getPlayerTextureSquareSize(Texture2D playerTexture, float textureScale) {
+    if (playerTexture.id == 0) {
+        return 0.0f;
+    }
+
+    const float imageWidthOnScreen =
+        (float)playerTexture.width * textureScale * getVirtualScaleX();
+    const float imageHeightOnScreen =
+        (float)playerTexture.height * textureScale * getVirtualScaleY();
+    const float squareSizeOnScreen =
+        (imageWidthOnScreen < imageHeightOnScreen) ?
+            imageWidthOnScreen :
+            imageHeightOnScreen;
+
+    return squareSizeOnScreen / getVirtualScaleY();
+}
+
 static char* normalizeYesNoAnswer(const char* answerText) {
     const char* cursor = answerText;
     char token[16] = {0};
@@ -961,6 +978,15 @@ void llmGuessingRound(
     bool waiting_for_answer = false;
     bool waiting_for_elimination = false;
     int singleCandidate = -1;
+    char playerIdentityText[64];
+    const float playerImageScale = 0.78f;
+
+    snprintf(
+        playerIdentityText,
+        sizeof(playerIdentityText),
+        "You are Character %d",
+        playerCharacterIndex + 1
+    );
 
     pthread_mutex_lock(&mutex);
     if (pending_elimination_list) {
@@ -1025,17 +1051,28 @@ void llmGuessingRound(
                     return;
                 }
             } else {
+                const int titleFontSize = 24;
+                const float titleY = 18.0f;
+                const float imageTopY = titleY + (float)titleFontSize + 12.0f;
+                const float imageBottomY =
+                    imageTopY + getPlayerTextureSquareSize(playerTexture, playerImageScale);
                 beginVirtualFrame();
                 ClearBackground(RAYWHITE);
 
-                DrawText(playerCharacterString, 10, 10, 20, BLACK);
-                drawCenteredPlayerTexture(playerTexture, (float)SCREEN_WIDTH * 0.5f, 170.0f, 0.8f);
+                DrawText(
+                    playerIdentityText,
+                    SCREEN_WIDTH / 2 - MeasureText(playerIdentityText, titleFontSize) / 2,
+                    (int)titleY,
+                    titleFontSize,
+                    BLACK
+                );
+                drawCenteredPlayerTexture(playerTexture, (float)SCREEN_WIDTH * 0.5f, imageTopY, playerImageScale);
 
                 DrawText(
                     "LLM is generating a question...",
-                    SCREEN_WIDTH / 2 - MeasureText("LLM is generating a question...", 25) / 2,
-                    140,
-                    25,
+                    SCREEN_WIDTH / 2 - MeasureText("LLM is generating a question...", 20) / 2,
+                    (int)imageBottomY + 22,
+                    20,
                     GRAY
                 );
 
@@ -1045,17 +1082,49 @@ void llmGuessingRound(
         }
 
         if (waiting_for_answer) {
-            Rectangle yesButton = {100, 120, 80, 30};
-            Rectangle noButton = {200, 120, 80, 30};
+            const int titleFontSize = 24;
+            const int questionFontSize = 20;
+            const float titleY = 18.0f;
+            const float imageTopY = titleY + (float)titleFontSize + 12.0f;
+            const float imageBottomY = imageTopY + getPlayerTextureSquareSize(playerTexture, playerImageScale);
+            const int buttonWidth = 80;
+            const int buttonHeight = 30;
+            const int buttonGap = 20;
+            const int buttonsTotalWidth = buttonWidth * 2 + buttonGap;
+            const int buttonsStartX = SCREEN_WIDTH / 2 - buttonsTotalWidth / 2;
+            Rectangle yesButton = {
+                (float)buttonsStartX,
+                imageBottomY + 72.0f,
+                (float)buttonWidth,
+                (float)buttonHeight
+            };
+            Rectangle noButton = {
+                (float)(buttonsStartX + buttonWidth + buttonGap),
+                imageBottomY + 72.0f,
+                (float)buttonWidth,
+                (float)buttonHeight
+            };
 
             beginVirtualFrame();
             ClearBackground(RAYWHITE);
 
-            DrawText(playerCharacterString, 10, 10, 20, BLACK);
-            drawCenteredPlayerTexture(playerTexture, (float)SCREEN_WIDTH * 0.5f, 170.0f, 0.8f);
+            DrawText(
+                playerIdentityText,
+                SCREEN_WIDTH / 2 - MeasureText(playerIdentityText, titleFontSize) / 2,
+                (int)titleY,
+                titleFontSize,
+                BLACK
+            );
+            drawCenteredPlayerTexture(playerTexture, (float)SCREEN_WIDTH * 0.5f, imageTopY, playerImageScale);
 
             pthread_mutex_lock(&mutex);
-            DrawText(currentQuestion, 100, 70, 20, GRAY);
+            DrawText(
+                currentQuestion,
+                SCREEN_WIDTH / 2 - MeasureText(currentQuestion, questionFontSize) / 2,
+                (int)imageBottomY + 30,
+                questionFontSize,
+                GRAY
+            );
             pthread_mutex_unlock(&mutex);
 
             DrawRectangleRec(yesButton, GREEN);
