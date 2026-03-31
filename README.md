@@ -72,7 +72,6 @@ Runtime configuration is read with this precedence (highest first):
 
 Supported variables:
 
-- `GUESS_LLAMA_USERNAME` (default: `username`)
 - `GUESS_LLAMA_SERVER_URL` (default: `localhost:1234`)
 - `GUESS_LLAMA_LLM_SERVER` (default: `http://localhost:9090`)
 - `GUESS_LLAMA_LLM_API_KEY` (default: empty, no Authorization header sent)
@@ -87,7 +86,6 @@ OpenRouter note:
 Linux/macOS example:
 
 ```bash
-export GUESS_LLAMA_USERNAME="your-name"
 export GUESS_LLAMA_SERVER_URL="127.0.0.1:1234"
 export GUESS_LLAMA_LLM_SERVER="http://127.0.0.1:9090"
 export GUESS_LLAMA_LLM_API_KEY=""
@@ -98,7 +96,6 @@ export GUESS_LLAMA_LLM_MODEL="qwen3.5"
 `.env` file example:
 
 ```dotenv
-GUESS_LLAMA_USERNAME=your-name
 GUESS_LLAMA_SERVER_URL=127.0.0.1:1234
 GUESS_LLAMA_LLM_SERVER=http://127.0.0.1:9090
 GUESS_LLAMA_LLM_API_KEY=
@@ -108,7 +105,6 @@ GUESS_LLAMA_LLM_MODEL=qwen3.5
 `.env` OpenRouter example:
 
 ```dotenv
-GUESS_LLAMA_USERNAME=your-name
 GUESS_LLAMA_SERVER_URL=127.0.0.1:1234
 GUESS_LLAMA_LLM_SERVER=https://openrouter.ai/api
 GUESS_LLAMA_LLM_API_KEY=sk-or-v1-...
@@ -118,7 +114,6 @@ GUESS_LLAMA_LLM_MODEL=qwen/qwen3.5-122b-a10b
 PowerShell example:
 
 ```powershell
-$env:GUESS_LLAMA_USERNAME = "your-name"
 $env:GUESS_LLAMA_SERVER_URL = "127.0.0.1:1234"
 $env:GUESS_LLAMA_LLM_SERVER = "http://127.0.0.1:9090"
 $env:GUESS_LLAMA_LLM_API_KEY = ""

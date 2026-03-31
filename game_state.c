@@ -100,7 +100,6 @@ static bool ensureVirtualRenderTargetSize(void) {
     return true;
 }
 
-const char* username = "username";
 const char* server_url = "localhost:1234";
 const char* llmServerAddress = "http://localhost:9090";
 const char* llmApiKey = "";
@@ -252,7 +251,6 @@ void initRuntimeConfig(void) {
     loadDotEnvFile(".env.local");
     loadDotEnvFile(".env");
 
-    username = getEnvOrDefault("GUESS_LLAMA_USERNAME", "username");
     server_url = getEnvOrDefault("GUESS_LLAMA_SERVER_URL", "localhost:1234");
     llmServerAddress = getEnvOrDefault("GUESS_LLAMA_LLM_SERVER", "http://localhost:9090");
     llmApiKey = getEnvOrDefault("GUESS_LLAMA_LLM_API_KEY", "");
