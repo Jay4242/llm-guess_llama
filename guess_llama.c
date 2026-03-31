@@ -75,7 +75,8 @@ int main(void) {
     char theme_input_buffer[100] = {0};
     bool themeInputSelected = false;
     Rectangle themeInputBox = {100, 100, 200, 30};
-    Rectangle llmThemeButton = {320, 100, 200, 30};
+    Rectangle submitThemeButton = {100, 150, 200, 30};
+    Rectangle llmThemeButton = {320, 150, 200, 30};
     bool llmThemeSelected = false;
     bool guessingRoundStarted = false;
     bool playerTurnActive = false;
@@ -145,6 +146,35 @@ int main(void) {
 
         switch (state) {
             case GAME_STATE_THEME_SELECTION: {
+                const float inputWidth = 300.0f;
+                const float inputHeight = 36.0f;
+                const float buttonWidth = 260.0f;
+                const float buttonHeight = 36.0f;
+                const float buttonGap = 16.0f;
+                const float totalButtonsWidth = buttonWidth * 2.0f + buttonGap;
+                const float panelStartY = ((float)SCREEN_HEIGHT - 190.0f) * 0.5f;
+                const float titleY = panelStartY;
+
+                themeInputBox = (Rectangle){
+                    ((float)SCREEN_WIDTH - inputWidth) * 0.5f,
+                    titleY + 46.0f,
+                    inputWidth,
+                    inputHeight
+                };
+                const float hintY = themeInputBox.y + themeInputBox.height + 8.0f;
+                submitThemeButton = (Rectangle){
+                    ((float)SCREEN_WIDTH - totalButtonsWidth) * 0.5f,
+                    hintY + 24.0f,
+                    buttonWidth,
+                    buttonHeight
+                };
+                llmThemeButton = (Rectangle){
+                    submitThemeButton.x + buttonWidth + buttonGap,
+                    submitThemeButton.y,
+                    buttonWidth,
+                    buttonHeight
+                };
+
                 if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                     themeInputSelected = CheckCollisionPointRec(getVirtualMousePosition(), themeInputBox);
                 }
@@ -168,7 +198,16 @@ int main(void) {
                     }
                 }
 
-                if (IsKeyPressed(KEY_ENTER) && themeInputSelected && strlen(theme_input_buffer) > 0) {
+                if (IsKeyPressed(KEY_ENTER) && strlen(theme_input_buffer) > 0) {
+                    llmThemeSelected = false;
+                    pthread_mutex_lock(&mutex);
+                    currentGameState = GAME_STATE_THEME_READY;
+                    pthread_mutex_unlock(&mutex);
+                }
+
+                if (CheckCollisionPointRec(getVirtualMousePosition(), submitThemeButton) &&
+                    IsMouseButtonReleased(MOUSE_BUTTON_LEFT) &&
+                    strlen(theme_input_buffer) > 0) {
                     llmThemeSelected = false;
                     pthread_mutex_lock(&mutex);
                     currentGameState = GAME_STATE_THEME_READY;
@@ -186,7 +225,13 @@ int main(void) {
                 beginVirtualFrame();
                 ClearBackground(RAYWHITE);
 
-                DrawText("Enter a theme:", 100, 70, 20, GRAY);
+                DrawText(
+                    "Enter a theme:",
+                    SCREEN_WIDTH / 2 - MeasureText("Enter a theme:", 30) / 2,
+                    (int)titleY,
+                    30,
+                    GRAY
+                );
                 DrawRectangleRec(themeInputBox, LIGHTGRAY);
                 DrawText(theme_input_buffer, (int)themeInputBox.x + 5, (int)themeInputBox.y + 8, 20, BLACK);
                 if (themeInputSelected) {
@@ -199,10 +244,28 @@ int main(void) {
                     );
                 }
 
+                DrawText(
+                    "Press Enter or click a button",
+                    SCREEN_WIDTH / 2 - MeasureText("Press Enter or click a button", 18) / 2,
+                    (int)hintY,
+                    18,
+                    GRAY
+                );
+
+                Color submitThemeButtonColor = strlen(theme_input_buffer) > 0 ? SKYBLUE : LIGHTGRAY;
+                DrawRectangleRec(submitThemeButton, submitThemeButtonColor);
+                DrawText(
+                    "Use Typed Theme",
+                    (int)(submitThemeButton.x + (submitThemeButton.width - MeasureText("Use Typed Theme", 20)) * 0.5f),
+                    (int)submitThemeButton.y + 8,
+                    20,
+                    BLACK
+                );
+
                 DrawRectangleRec(llmThemeButton, ORANGE);
                 DrawText(
                     "LLM Random Theme",
-                    (int)llmThemeButton.x + 5,
+                    (int)(llmThemeButton.x + (llmThemeButton.width - MeasureText("LLM Random Theme", 20)) * 0.5f),
                     (int)llmThemeButton.y + 8,
                     20,
                     BLACK
