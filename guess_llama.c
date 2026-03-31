@@ -433,7 +433,12 @@ int main(void) {
             }
 
             case GAME_STATE_PLAYING: {
-                Rectangle startGuessingButton = {10, 70, 250, 30};
+                Rectangle startGuessingButton = {
+                    ((float)SCREEN_WIDTH - 250.0f) * 0.5f,
+                    ((float)SCREEN_HEIGHT - 30.0f) * 0.5f + 40.0f,
+                    250,
+                    30
+                };
                 Rectangle questionInputBox = {10, 44, 580, 34};
                 Rectangle submitQuestionButton = {600, 44, 190, 34};
                 Rectangle endTurnButton = {600, 44, 190, 34};
@@ -493,8 +498,8 @@ int main(void) {
 
                     DrawRectangleRec(startGuessingButton, BLUE);
                     DrawText(
-                        "Start Guessing Round",
-                        (int)startGuessingButton.x + 5,
+                        "Start Guess Llama!",
+                        (int)startGuessingButton.x + 21,
                         (int)startGuessingButton.y + 8,
                         20,
                         WHITE
