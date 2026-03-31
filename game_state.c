@@ -67,6 +67,8 @@ static float virtualViewportHeight = (float)SCREEN_HEIGHT;
 const char* username = "username";
 const char* server_url = "localhost:1234";
 const char* llmServerAddress = "http://localhost:9090";
+const char* llmApiKey = "";
+const char* llmModel = "qwen3.5";
 
 static const char* getEnvOrDefault(const char* name, const char* fallback) {
     const char* value = getenv(name);
@@ -217,11 +219,13 @@ void initRuntimeConfig(void) {
     username = getEnvOrDefault("GUESS_LLAMA_USERNAME", "username");
     server_url = getEnvOrDefault("GUESS_LLAMA_SERVER_URL", "localhost:1234");
     llmServerAddress = getEnvOrDefault("GUESS_LLAMA_LLM_SERVER", "http://localhost:9090");
+    llmApiKey = getEnvOrDefault("GUESS_LLAMA_LLM_API_KEY", "");
+    llmModel = getEnvOrDefault("GUESS_LLAMA_LLM_MODEL", "qwen3.5");
 }
 
 static void updateVirtualViewport(void) {
-    virtualViewportWidth = (float)GetRenderWidth();
-    virtualViewportHeight = (float)GetRenderHeight();
+    virtualViewportWidth = (float)GetScreenWidth();
+    virtualViewportHeight = (float)GetScreenHeight();
 
     if (virtualViewportWidth <= 0.0f) {
         virtualViewportWidth = (float)SCREEN_WIDTH;
@@ -283,15 +287,11 @@ Vector2 getVirtualMousePosition(void) {
     updateVirtualViewport();
 
     Vector2 mousePos = GetMousePosition();
-    Vector2 dpiScale = GetWindowScaleDPI();
     Vector2 virtualMousePos = {-1000.0f, -1000.0f};
 
     if (virtualScaleX <= 0.0f || virtualScaleY <= 0.0f) {
         return virtualMousePos;
     }
-
-    mousePos.x *= dpiScale.x;
-    mousePos.y *= dpiScale.y;
 
     virtualMousePos.x = mousePos.x / virtualScaleX;
     virtualMousePos.y = mousePos.y / virtualScaleY;
