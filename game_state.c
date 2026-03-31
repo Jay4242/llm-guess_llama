@@ -1,4 +1,5 @@
 #include "guess_llama.h"
+#include <rlgl.h>
 
 GameState currentGameState = GAME_STATE_THEME_SELECTION;
 
@@ -63,6 +64,40 @@ static float virtualScaleX = 1.0f;
 static float virtualScaleY = 1.0f;
 static float virtualViewportWidth = (float)SCREEN_WIDTH;
 static float virtualViewportHeight = (float)SCREEN_HEIGHT;
+
+static bool ensureVirtualRenderTargetSize(void) {
+    int targetWidth = GetScreenWidth();
+    int targetHeight = GetScreenHeight();
+    RenderTexture2D newRenderTarget = {0};
+
+    if (targetWidth <= 0) {
+        targetWidth = SCREEN_WIDTH;
+    }
+    if (targetHeight <= 0) {
+        targetHeight = SCREEN_HEIGHT;
+    }
+
+    if (virtualRenderTarget.id != 0 &&
+        virtualRenderTarget.texture.width == targetWidth &&
+        virtualRenderTarget.texture.height == targetHeight) {
+        return true;
+    }
+
+    newRenderTarget = LoadRenderTexture(targetWidth, targetHeight);
+    if (newRenderTarget.id == 0) {
+        fprintf(stderr, "Failed to create virtual render target (%dx%d).\n", targetWidth, targetHeight);
+        return false;
+    }
+
+    if (virtualRenderTarget.id != 0) {
+        UnloadRenderTexture(virtualRenderTarget);
+    }
+
+    virtualRenderTarget = newRenderTarget;
+
+    SetTextureFilter(virtualRenderTarget.texture, TEXTURE_FILTER_BILINEAR);
+    return true;
+}
 
 const char* username = "username";
 const char* server_url = "localhost:1234";
@@ -251,23 +286,35 @@ void refreshVirtualViewport(void) {
 }
 
 bool initVirtualRendering(void) {
-    virtualRenderTarget = LoadRenderTexture(SCREEN_WIDTH, SCREEN_HEIGHT);
-    if (virtualRenderTarget.id == 0) {
-        fprintf(stderr, "Failed to create virtual render target.\n");
+    if (!ensureVirtualRenderTargetSize()) {
         return false;
     }
 
-    SetTextureFilter(virtualRenderTarget.texture, TEXTURE_FILTER_BILINEAR);
     updateVirtualViewport();
     return true;
 }
 
 void beginVirtualFrame(void) {
     updateVirtualViewport();
+    if (virtualRenderTarget.id == 0 && !ensureVirtualRenderTargetSize()) {
+        return;
+    }
+
+    ensureVirtualRenderTargetSize();
+
     BeginTextureMode(virtualRenderTarget);
+    rlPushMatrix();
+    rlScalef(virtualScaleX, virtualScaleY, 1.0f);
 }
 
 void endVirtualFrame(void) {
+    if (virtualRenderTarget.id == 0) {
+        BeginDrawing();
+        ClearBackground(BLACK);
+        EndDrawing();
+        return;
+    }
+
     Rectangle src = {
         0.0f,
         0.0f,
@@ -276,6 +323,7 @@ void endVirtualFrame(void) {
     };
     Rectangle dst = {0.0f, 0.0f, virtualViewportWidth, virtualViewportHeight};
 
+    rlPopMatrix();
     EndTextureMode();
     BeginDrawing();
     ClearBackground(BLACK);
