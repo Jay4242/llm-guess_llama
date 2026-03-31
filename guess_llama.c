@@ -512,8 +512,8 @@ int main(void) {
                         int row = i / boardColumns;
                         int col = i % boardColumns;
                         Rectangle cellRect = {
-                            boardOriginX + (float)col * (cellWidth + cellGap),
-                            boardOriginY + (float)row * (cellHeight + cellGap),
+                            gridOriginX + (float)col * (cellWidth + cellGap),
+                            gridOriginY + (float)row * (cellHeight + cellGap),
                             cellWidth,
                             cellHeight
                         };
