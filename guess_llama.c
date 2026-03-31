@@ -63,6 +63,8 @@ int main(void) {
     char playerLastAnswer[64] = {0};
     PlayerTurnPhase playerTurnPhase = PLAYER_TURN_PHASE_ASK_QUESTION;
     int zoomedCharacterIndex = -1;
+    bool suppressLeftReleaseAfterZoomClose = false;
+    bool suppressRightReleaseAfterZoomClose = false;
 
     initRuntimeConfig();
     srand((unsigned int)time(NULL));
@@ -463,13 +465,30 @@ int main(void) {
                 const bool rightClickStarted = IsMouseButtonPressed(MOUSE_BUTTON_RIGHT);
                 const bool leftClickReleased = IsMouseButtonReleased(MOUSE_BUTTON_LEFT);
                 const bool rightClickReleased = IsMouseButtonReleased(MOUSE_BUTTON_RIGHT);
+                bool leftClickReleasedForActions = leftClickReleased;
+                bool rightClickReleasedForActions = rightClickReleased;
                 bool zoomClickConsumed = false;
+
+                if (suppressLeftReleaseAfterZoomClose && leftClickReleased) {
+                    leftClickReleasedForActions = false;
+                    suppressLeftReleaseAfterZoomClose = false;
+                }
+                if (suppressRightReleaseAfterZoomClose && rightClickReleased) {
+                    rightClickReleasedForActions = false;
+                    suppressRightReleaseAfterZoomClose = false;
+                }
 
                 if (zoomedCharacterIndex >= 0 &&
                     (leftClickStarted || rightClickStarted || leftClickReleased || rightClickReleased)) {
                     zoomedCharacterIndex = -1;
                     zoomClickConsumed = true;
-                } else if (rightClickReleased && hoveredCharacterIndex >= 0 &&
+                    if (leftClickStarted) {
+                        suppressLeftReleaseAfterZoomClose = true;
+                    }
+                    if (rightClickStarted) {
+                        suppressRightReleaseAfterZoomClose = true;
+                    }
+                } else if (rightClickReleasedForActions && hoveredCharacterIndex >= 0 &&
                            boardCharacterTextures[hoveredCharacterIndex].id != 0) {
                     zoomedCharacterIndex = hoveredCharacterIndex;
                     zoomClickConsumed = true;
@@ -508,7 +527,7 @@ int main(void) {
                 if (playerTurnPhase == PLAYER_TURN_PHASE_ASK_QUESTION &&
                     !zoomClickConsumed &&
                     CheckCollisionPointRec(getVirtualMousePosition(), submitQuestionButton) &&
-                    IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                    leftClickReleasedForActions) {
                     if (strlen(playerQuestionInput) > 0 && !playerQuestionRequestPending) {
                         strncpy(playerLastQuestion, playerQuestionInput, sizeof(playerLastQuestion) - 1);
                         playerLastQuestion[sizeof(playerLastQuestion) - 1] = '\0';
@@ -562,7 +581,7 @@ int main(void) {
                 if (playerTurnPhase == PLAYER_TURN_PHASE_ELIMINATION &&
                     !zoomClickConsumed &&
                     CheckCollisionPointRec(getVirtualMousePosition(), endTurnButton) &&
-                    IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                    leftClickReleasedForActions) {
                     if (playerRemainingCount == 1 && playerCharacterActive[llmCharacter]) {
                         pthread_mutex_lock(&mutex);
                         currentGameState = GAME_STATE_PLAYER_WINS;
@@ -577,7 +596,7 @@ int main(void) {
 
                 if (playerTurnPhase == PLAYER_TURN_PHASE_ELIMINATION &&
                     !zoomClickConsumed &&
-                    IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                    leftClickReleasedForActions) {
                     if (hoveredCharacterIndex >= 0) {
                         playerCharacterActive[hoveredCharacterIndex] = !playerCharacterActive[hoveredCharacterIndex];
                         playerRemainingCount += playerCharacterActive[hoveredCharacterIndex] ? 1 : -1;
