@@ -62,6 +62,7 @@ static bool assignPlayerAndOpponent(void) {
     do {
         llmCharacter = rand() % NUM_CHARACTERS;
     } while (llmCharacter == playerCharacter);
+    printf("[DEBUG] LLM backend character is %d\n", llmCharacter + 1);
 
     initializeRemainingCharacters();
     if (!charactersRemaining) {
