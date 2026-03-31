@@ -674,8 +674,20 @@ int main(void) {
                     CheckCollisionPointRec(getVirtualMousePosition(), endTurnButton) &&
                     leftClickReleasedForActions) {
                     int singleCandidate = -1;
-                    if (getSinglePlayerCandidate(&singleCandidate) && singleCandidate == llmCharacter) {
+                    if (!playerCharacterActive[llmCharacter]) {
                         pthread_mutex_lock(&mutex);
+                        snprintf(
+                            gameOverReasonText,
+                            sizeof(gameOverReasonText),
+                            "You eliminated the LLM character.");
+                        currentGameState = GAME_STATE_LLM_WINS;
+                        pthread_mutex_unlock(&mutex);
+                    } else if (getSinglePlayerCandidate(&singleCandidate) && singleCandidate == llmCharacter) {
+                        pthread_mutex_lock(&mutex);
+                        snprintf(
+                            gameOverReasonText,
+                            sizeof(gameOverReasonText),
+                            "You narrowed it down to the hidden character.");
                         currentGameState = GAME_STATE_PLAYER_WINS;
                         pthread_mutex_unlock(&mutex);
                     } else {
@@ -878,10 +890,19 @@ int main(void) {
                     20,
                     DARKGRAY
                 );
+                if (gameOverReasonText[0] != '\0') {
+                    DrawText(
+                        gameOverReasonText,
+                        SCREEN_WIDTH / 2 - MeasureText(gameOverReasonText, 20) / 2,
+                        SCREEN_HEIGHT / 2 + 45,
+                        20,
+                        DARKGRAY
+                    );
+                }
                 DrawText(
                     "Press ESC to exit",
                     SCREEN_WIDTH / 2 - MeasureText("Press ESC to exit", 20) / 2,
-                    SCREEN_HEIGHT / 2 + 60,
+                    SCREEN_HEIGHT / 2 + 75,
                     20,
                     GRAY
                 );
@@ -914,10 +935,19 @@ int main(void) {
                     20,
                     DARKGRAY
                 );
+                if (gameOverReasonText[0] != '\0') {
+                    DrawText(
+                        gameOverReasonText,
+                        SCREEN_WIDTH / 2 - MeasureText(gameOverReasonText, 20) / 2,
+                        SCREEN_HEIGHT / 2 + 45,
+                        20,
+                        DARKGRAY
+                    );
+                }
                 DrawText(
                     "Press ESC to exit",
                     SCREEN_WIDTH / 2 - MeasureText("Press ESC to exit", 20) / 2,
-                    SCREEN_HEIGHT / 2 + 60,
+                    SCREEN_HEIGHT / 2 + 75,
                     20,
                     GRAY
                 );
