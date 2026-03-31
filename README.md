@@ -61,7 +61,6 @@ gcc -std=gnu11 -D_GNU_SOURCE -Wall -Wextra -g \
   -o guess_llama -lcurl -ljansson -lraylib -lpthread
 ```
 
-`stable-diffusion.c` is now a game module, not a standalone executable target.
 
 ## Configuration
 
@@ -114,7 +113,7 @@ GUESS_LLAMA_USERNAME=your-name
 GUESS_LLAMA_SERVER_URL=127.0.0.1:1234
 GUESS_LLAMA_LLM_SERVER=https://openrouter.ai/api
 GUESS_LLAMA_LLM_API_KEY=sk-or-v1-...
-GUESS_LLAMA_LLM_MODEL=openai/gpt-4o-mini
+GUESS_LLAMA_LLM_MODEL=qwen/qwen3.5-122b-a10b
 ```
 
 PowerShell example:
