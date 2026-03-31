@@ -1004,6 +1004,10 @@ void llmGuessingRound(
         ) &&
         singleCandidate == playerCharacterIndex) {
         pthread_mutex_lock(&mutex);
+        snprintf(
+            gameOverReasonText,
+            sizeof(gameOverReasonText),
+            "LLM narrowed it down to your character.");
         currentGameState = GAME_STATE_LLM_WINS;
         pthread_mutex_unlock(&mutex);
         printf("LLM narrowed it down to the player's character! LLM wins!\n");
@@ -1211,6 +1215,10 @@ void llmGuessingRound(
 
                         if (characterToEliminate == playerCharacterIndex) {
                             pthread_mutex_lock(&mutex);
+                            snprintf(
+                                gameOverReasonText,
+                                sizeof(gameOverReasonText),
+                                "LLM eliminated your character.");
                             currentGameState = GAME_STATE_PLAYER_WINS;
                             pthread_mutex_unlock(&mutex);
                             printf("LLM eliminated player's character! Player wins!\n");
@@ -1251,6 +1259,10 @@ void llmGuessingRound(
                         ) &&
                         singleCandidate == playerCharacterIndex) {
                         pthread_mutex_lock(&mutex);
+                        snprintf(
+                            gameOverReasonText,
+                            sizeof(gameOverReasonText),
+                            "LLM narrowed it down to your character.");
                         currentGameState = GAME_STATE_LLM_WINS;
                         pthread_mutex_unlock(&mutex);
                         printf("LLM narrowed it down to the player's character! LLM wins!\n");
