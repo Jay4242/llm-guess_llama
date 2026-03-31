@@ -629,21 +629,24 @@ int main(void) {
                             squareSizeOnScreen / virtualScaleY
                         };
                         Texture2D texture = boardCharacterTextures[i];
-                        float scaleX = squareRect.width / (float)texture.width;
-                        float scaleY = squareRect.height / (float)texture.height;
-                        float scale = (scaleX < scaleY) ? scaleX : scaleY;
-                        float drawWidth = (float)texture.width * scale;
-                        float drawHeight = (float)texture.height * scale;
+                        float sourceSize =
+                            (texture.width < texture.height) ? (float)texture.width : (float)texture.height;
+                        Rectangle srcRect = {
+                            ((float)texture.width - sourceSize) * 0.5f,
+                            ((float)texture.height - sourceSize) * 0.5f,
+                            sourceSize,
+                            sourceSize
+                        };
                         Rectangle drawRect = {
-                            squareRect.x + (squareRect.width - drawWidth) * 0.5f,
-                            squareRect.y + (squareRect.height - drawHeight) * 0.5f,
-                            drawWidth,
-                            drawHeight
+                            (float)((int)(squareRect.x * virtualScaleX + 0.5f)) / virtualScaleX,
+                            (float)((int)(squareRect.y * virtualScaleY + 0.5f)) / virtualScaleY,
+                            (float)((int)(squareRect.width * virtualScaleX + 0.5f)) / virtualScaleX,
+                            (float)((int)(squareRect.height * virtualScaleY + 0.5f)) / virtualScaleY
                         };
 
                         DrawTexturePro(
                             texture,
-                            (Rectangle){0, 0, (float)texture.width, (float)texture.height},
+                            srcRect,
                             drawRect,
                             (Vector2){0},
                             0.0f,
