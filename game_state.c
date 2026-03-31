@@ -61,10 +61,14 @@ RenderTexture2D virtualRenderTarget = {0};
 
 static float virtualScaleX = 1.0f;
 static float virtualScaleY = 1.0f;
+static float virtualViewportWidth = (float)SCREEN_WIDTH;
+static float virtualViewportHeight = (float)SCREEN_HEIGHT;
 
 const char* username = "username";
 const char* server_url = "localhost:1234";
 const char* llmServerAddress = "http://localhost:9090";
+const char* llmApiKey = "";
+const char* llmModel = "qwen3.5";
 
 static const char* getEnvOrDefault(const char* name, const char* fallback) {
     const char* value = getenv(name);
@@ -215,11 +219,23 @@ void initRuntimeConfig(void) {
     username = getEnvOrDefault("GUESS_LLAMA_USERNAME", "username");
     server_url = getEnvOrDefault("GUESS_LLAMA_SERVER_URL", "localhost:1234");
     llmServerAddress = getEnvOrDefault("GUESS_LLAMA_LLM_SERVER", "http://localhost:9090");
+    llmApiKey = getEnvOrDefault("GUESS_LLAMA_LLM_API_KEY", "");
+    llmModel = getEnvOrDefault("GUESS_LLAMA_LLM_MODEL", "qwen3.5");
 }
 
 static void updateVirtualViewport(void) {
-    virtualScaleX = (float)GetScreenWidth() / (float)SCREEN_WIDTH;
-    virtualScaleY = (float)GetScreenHeight() / (float)SCREEN_HEIGHT;
+    virtualViewportWidth = (float)GetScreenWidth();
+    virtualViewportHeight = (float)GetScreenHeight();
+
+    if (virtualViewportWidth <= 0.0f) {
+        virtualViewportWidth = (float)SCREEN_WIDTH;
+    }
+    if (virtualViewportHeight <= 0.0f) {
+        virtualViewportHeight = (float)SCREEN_HEIGHT;
+    }
+
+    virtualScaleX = virtualViewportWidth / (float)SCREEN_WIDTH;
+    virtualScaleY = virtualViewportHeight / (float)SCREEN_HEIGHT;
 
     if (virtualScaleX <= 0.0f) {
         virtualScaleX = 1.0f;
@@ -228,6 +244,10 @@ static void updateVirtualViewport(void) {
         virtualScaleY = 1.0f;
     }
 
+}
+
+void refreshVirtualViewport(void) {
+    updateVirtualViewport();
 }
 
 bool initVirtualRendering(void) {
@@ -254,7 +274,7 @@ void endVirtualFrame(void) {
         (float)virtualRenderTarget.texture.width,
         -(float)virtualRenderTarget.texture.height
     };
-    Rectangle dst = {0.0f, 0.0f, (float)GetScreenWidth(), (float)GetScreenHeight()};
+    Rectangle dst = {0.0f, 0.0f, virtualViewportWidth, virtualViewportHeight};
 
     EndTextureMode();
     BeginDrawing();
@@ -264,6 +284,8 @@ void endVirtualFrame(void) {
 }
 
 Vector2 getVirtualMousePosition(void) {
+    updateVirtualViewport();
+
     Vector2 mousePos = GetMousePosition();
     Vector2 virtualMousePos = {-1000.0f, -1000.0f};
 

@@ -71,6 +71,8 @@ int main(void) {
         GameState state;
         bool current_confirm_regen_prompt_active;
 
+        refreshVirtualViewport();
+
         pthread_mutex_lock(&mutex);
         state = currentGameState;
         current_confirm_regen_prompt_active = confirm_regen_prompt_active;
@@ -510,8 +512,8 @@ int main(void) {
                         int row = i / boardColumns;
                         int col = i % boardColumns;
                         Rectangle cellRect = {
-                            boardOriginX + (float)col * (cellWidth + cellGap),
-                            boardOriginY + (float)row * (cellHeight + cellGap),
+                            gridOriginX + (float)col * (cellWidth + cellGap),
+                            gridOriginY + (float)row * (cellHeight + cellGap),
                             cellWidth,
                             cellHeight
                         };
