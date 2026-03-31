@@ -30,6 +30,7 @@ storage.c            Theme directory helpers and JSON save/load logic
 - Stable Diffusion image generation with progress updates in the Raylib UI.
 - Reusable image/theme directories under `images/<theme_name>/`.
 - Vision-based LLM guessing rounds with yes/no answers in the GUI.
+- Right-click character zoom preview during elimination (any left/right click closes it).
 
 ## Dependencies
 
@@ -136,6 +137,12 @@ $env:GUESS_LLAMA_LLM_MODEL = "qwen3.5"
 3. If an image directory for that theme already exists, choose whether to reuse it or regenerate it.
 4. Wait for feature generation, save/load of game data, and image generation.
 5. Click `Start Guessing Round` and answer the LLM's yes/no question.
+
+During the player's elimination phase:
+
+- Left-click a character card to toggle eliminated/not eliminated.
+- Right-click a character card to open a centered zoom preview.
+- Click either mouse button to close the zoom preview.
 
 ## Notes
 
