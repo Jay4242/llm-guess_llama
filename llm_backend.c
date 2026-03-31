@@ -5,6 +5,30 @@ typedef struct {
     size_t size;
 } ResponseData;
 
+static void trim_response_whitespace(char* text) {
+    char* start;
+    size_t len;
+
+    if (!text) {
+        return;
+    }
+
+    start = text;
+    while (*start != '\0' && isspace((unsigned char)*start)) {
+        start++;
+    }
+
+    if (start != text) {
+        memmove(text, start, strlen(start) + 1);
+    }
+
+    len = strlen(text);
+    while (len > 0 && isspace((unsigned char)text[len - 1])) {
+        text[len - 1] = '\0';
+        len--;
+    }
+}
+
 static size_t write_callback(char* ptr, size_t size, size_t nmemb, void* userdata) {
     ResponseData* data = (ResponseData*)userdata;
     size_t chunk_size = size * nmemb;
@@ -79,6 +103,8 @@ static char* perform_json_post(const char* url, const char* data, long timeout_s
         fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
         free(response.data);
         response.data = NULL;
+    } else {
+        trim_response_whitespace(response.data);
     }
 
     curl_slist_free_all(headers);
