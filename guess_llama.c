@@ -374,8 +374,8 @@ int main(void) {
                         setup_thread_started = false;
                     }
 
-                    loadPlayerCharacterTexture();
                     loadBoardCharacterTextures();
+                    loadPlayerCharacterTexture();
 
                     pthread_mutex_lock(&mutex);
                     currentGameState = GAME_STATE_PLAYING;

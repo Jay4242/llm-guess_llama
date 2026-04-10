@@ -114,6 +114,8 @@ extern bool boardCharacterTexturesLoaded;
 extern RenderTexture2D virtualRenderTarget;
 
 extern const char* server_url;
+extern const char* serverModel;
+extern const char* serverApiKey;
 extern const char* llmServerAddress;
 extern const char* llmApiKey;
 extern const char* llmModel;
@@ -130,6 +132,8 @@ char* getLLMResponseWithVision(
     const char* final_prompt,
     double temperature
 );
+void clear_llm_vision_image_cache(void);
+bool cache_llm_vision_image_from_loaded_image(const char* filepath, const Image* loadedImage);
 char** getThemesFromLLM(int* themeCount);
 char** getCharacterFeatures(const char* theme, int* featureCount);
 
@@ -154,6 +158,8 @@ bool load_game_data(
 );
 
 int generate_character_image(const char* prompt, int character_number, const char* image_dir);
+int generate_character_image_openrouter(const char* prompt, int character_number, const char* image_dir);
+bool is_openrouter_server_url(const char* url);
 void* generateImageThread(void* arg);
 
 typedef struct {
