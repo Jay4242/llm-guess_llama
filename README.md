@@ -20,6 +20,7 @@ game_state.c         Global game state/config definitions and shared cleanup
 game_setup.c         Setup thread, theme loading, character assignment, image batch startup
 gameplay.c           LLM guessing round and yes/no interaction flow
 llm_backend.c        LLM HTTP calls, vision payloads, and response cleanup helpers
+openrouter.c         OpenRouter image generation backend for image-capable chat models
 stable-diffusion.c   stable-diffusion.cpp backend/image generation logic used by the game
 storage.c            Theme directory helpers and JSON save/load logic
 ```
@@ -56,7 +57,7 @@ Manual compile equivalent:
 
 ```bash
 gcc -std=gnu11 -D_GNU_SOURCE -Wall -Wextra -g \
-  guess_llama.c game_state.c llm_backend.c storage.c gameplay.c game_setup.c stable-diffusion.c \
+  guess_llama.c game_state.c llm_backend.c storage.c gameplay.c game_setup.c openrouter.c stable-diffusion.c \
   -o guess_llama -lcurl -ljansson -lraylib -lpthread
 ```
 
@@ -72,21 +73,31 @@ Runtime configuration is read with this precedence (highest first):
 
 Supported variables:
 
-- `GUESS_LLAMA_SERVER_URL` (default: `localhost:1234`)
+- `GUESS_LLAMA_IMAGE_SERVER_URL` (default: `localhost:1234`)
+- `GUESS_LLAMA_IMAGE_SERVER_MODEL` (default: `black-forest-labs/flux.2-klein-4b`, used only when `GUESS_LLAMA_IMAGE_SERVER_URL` points at OpenRouter)
+- `GUESS_LLAMA_IMAGE_SERVER_API_KEY` (default: falls back to `GUESS_LLAMA_LLM_API_KEY`)
 - `GUESS_LLAMA_LLM_SERVER` (default: `http://localhost:9090`)
 - `GUESS_LLAMA_LLM_API_KEY` (default: empty, no Authorization header sent)
 - `GUESS_LLAMA_LLM_MODEL` (default: `qwen3.5`)
+
+Legacy compatibility note:
+
+- `GUESS_LLAMA_SERVER_URL`, `GUESS_LLAMA_SERVER_MODEL`, and `GUESS_LLAMA_SERVER_API_KEY` are still accepted as fallbacks.
 
 OpenRouter note:
 
 - Set `GUESS_LLAMA_LLM_SERVER` to `https://openrouter.ai/api` (not `https://openrouter.ai/api/v1`, because the game appends `/v1/chat/completions` internally).
 - Set `GUESS_LLAMA_LLM_API_KEY` to your OpenRouter key.
 - Set `GUESS_LLAMA_LLM_MODEL` to an OpenRouter model slug such as `openai/gpt-4o-mini`.
+- To generate character images via OpenRouter (instead of a local stable-diffusion server), set `GUESS_LLAMA_IMAGE_SERVER_URL` to an OpenRouter URL such as `https://openrouter.ai/api` and set `GUESS_LLAMA_IMAGE_SERVER_MODEL` to an image-output model slug such as `black-forest-labs/flux.2-klein-4b`.
+- If you want a separate key for image generation, set `GUESS_LLAMA_IMAGE_SERVER_API_KEY`; otherwise it reuses `GUESS_LLAMA_LLM_API_KEY`.
 
 Linux/macOS example:
 
 ```bash
-export GUESS_LLAMA_SERVER_URL="127.0.0.1:1234"
+export GUESS_LLAMA_IMAGE_SERVER_URL="127.0.0.1:1234"
+export GUESS_LLAMA_IMAGE_SERVER_MODEL="black-forest-labs/flux.2-klein-4b"
+export GUESS_LLAMA_IMAGE_SERVER_API_KEY=""
 export GUESS_LLAMA_LLM_SERVER="http://127.0.0.1:9090"
 export GUESS_LLAMA_LLM_API_KEY=""
 export GUESS_LLAMA_LLM_MODEL="qwen3.5"
@@ -96,7 +107,9 @@ export GUESS_LLAMA_LLM_MODEL="qwen3.5"
 `.env` file example:
 
 ```dotenv
-GUESS_LLAMA_SERVER_URL=127.0.0.1:1234
+GUESS_LLAMA_IMAGE_SERVER_URL=127.0.0.1:1234
+GUESS_LLAMA_IMAGE_SERVER_MODEL=black-forest-labs/flux.2-klein-4b
+GUESS_LLAMA_IMAGE_SERVER_API_KEY=
 GUESS_LLAMA_LLM_SERVER=http://127.0.0.1:9090
 GUESS_LLAMA_LLM_API_KEY=
 GUESS_LLAMA_LLM_MODEL=qwen3.5
@@ -105,7 +118,9 @@ GUESS_LLAMA_LLM_MODEL=qwen3.5
 `.env` OpenRouter example:
 
 ```dotenv
-GUESS_LLAMA_SERVER_URL=127.0.0.1:1234
+GUESS_LLAMA_IMAGE_SERVER_URL=https://openrouter.ai/api
+GUESS_LLAMA_IMAGE_SERVER_MODEL=black-forest-labs/flux.2-klein-4b
+GUESS_LLAMA_IMAGE_SERVER_API_KEY=sk-or-v1-...
 GUESS_LLAMA_LLM_SERVER=https://openrouter.ai/api
 GUESS_LLAMA_LLM_API_KEY=sk-or-v1-...
 GUESS_LLAMA_LLM_MODEL=qwen/qwen3.5-122b-a10b
@@ -114,7 +129,9 @@ GUESS_LLAMA_LLM_MODEL=qwen/qwen3.5-122b-a10b
 PowerShell example:
 
 ```powershell
-$env:GUESS_LLAMA_SERVER_URL = "127.0.0.1:1234"
+$env:GUESS_LLAMA_IMAGE_SERVER_URL = "127.0.0.1:1234"
+$env:GUESS_LLAMA_IMAGE_SERVER_MODEL = "black-forest-labs/flux.2-klein-4b"
+$env:GUESS_LLAMA_IMAGE_SERVER_API_KEY = ""
 $env:GUESS_LLAMA_LLM_SERVER = "http://127.0.0.1:9090"
 $env:GUESS_LLAMA_LLM_API_KEY = ""
 $env:GUESS_LLAMA_LLM_MODEL = "qwen3.5"
