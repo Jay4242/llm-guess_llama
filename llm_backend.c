@@ -5,6 +5,15 @@ typedef struct {
     size_t size;
 } ResponseData;
 
+typedef struct {
+    char* filepath;
+    char* base64Png;
+} VisionImageCacheEntry;
+
+static VisionImageCacheEntry* visionImageCache = NULL;
+static size_t visionImageCacheCount = 0;
+static pthread_mutex_t visionImageCacheMutex = PTHREAD_MUTEX_INITIALIZER;
+
 static void trim_response_whitespace(char* text) {
     char* start;
     size_t len;
@@ -113,68 +122,246 @@ static char* perform_json_post(const char* url, const char* data, long timeout_s
     return response.data;
 }
 
-static char* read_image_as_base64(const char* filepath) {
+static char* encode_buffer_as_base64(const unsigned char* raw_data, size_t raw_size) {
     static const char b64_chars[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    FILE* file = fopen(filepath, "rb");
-    unsigned char* raw_data;
     char* b64_output;
-    long file_size;
-    size_t bytes_read;
     size_t b64_size;
-    int out_index = 0;
+    size_t out_index = 0;
 
-    if (!file) {
-        fprintf(stderr, "Failed to open image file: %s\n", filepath);
+    if (!raw_data || raw_size == 0) {
         return NULL;
     }
 
-    fseek(file, 0, SEEK_END);
-    file_size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    raw_data = malloc((size_t)file_size);
-    if (!raw_data) {
-        fprintf(stderr, "Failed to allocate memory for image data\n");
-        fclose(file);
-        return NULL;
-    }
-
-    bytes_read = fread(raw_data, 1, (size_t)file_size, file);
-    fclose(file);
-    if (bytes_read != (size_t)file_size) {
-        fprintf(stderr, "Failed to read image file\n");
-        free(raw_data);
-        return NULL;
-    }
-
-    b64_size = (((size_t)file_size + 2) / 3) * 4 + 1;
+    b64_size = ((raw_size + 2) / 3) * 4 + 1;
     b64_output = malloc(b64_size);
     if (!b64_output) {
         fprintf(stderr, "Failed to allocate memory for base64 data\n");
-        free(raw_data);
         return NULL;
     }
 
-    for (long i = 0; i < file_size; i += 3) {
-        unsigned int chunk = raw_data[i] << 16;
-        if (i + 1 < file_size) {
-            chunk |= raw_data[i + 1] << 8;
+    for (size_t i = 0; i < raw_size; i += 3) {
+        unsigned int chunk = (unsigned int)raw_data[i] << 16;
+        if (i + 1 < raw_size) {
+            chunk |= (unsigned int)raw_data[i + 1] << 8;
         }
-        if (i + 2 < file_size) {
-            chunk |= raw_data[i + 2];
+        if (i + 2 < raw_size) {
+            chunk |= (unsigned int)raw_data[i + 2];
         }
 
         b64_output[out_index++] = b64_chars[(chunk >> 18) & 0x3F];
         b64_output[out_index++] = b64_chars[(chunk >> 12) & 0x3F];
-        b64_output[out_index++] = (i + 1 < file_size) ? b64_chars[(chunk >> 6) & 0x3F] : '=';
-        b64_output[out_index++] = (i + 2 < file_size) ? b64_chars[chunk & 0x3F] : '=';
+        b64_output[out_index++] = (i + 1 < raw_size) ? b64_chars[(chunk >> 6) & 0x3F] : '=';
+        b64_output[out_index++] = (i + 2 < raw_size) ? b64_chars[chunk & 0x3F] : '=';
     }
     b64_output[out_index] = '\0';
 
-    free(raw_data);
     return b64_output;
+}
+
+static char* read_image_as_base64(const char* filepath) {
+    const int maxDimension = 512;
+    Image image;
+    unsigned char* encoded_image_data;
+    int encoded_image_size = 0;
+    char* b64_output;
+
+    image = LoadImage(filepath);
+    if (image.data == NULL) {
+        fprintf(stderr, "Failed to load image file: %s\n", filepath);
+        return NULL;
+    }
+
+    if (image.width != maxDimension || image.height != maxDimension) {
+        ImageResize(&image, maxDimension, maxDimension);
+    }
+
+    encoded_image_data = ExportImageToMemory(image, ".png", &encoded_image_size);
+    UnloadImage(image);
+
+    if (!encoded_image_data || encoded_image_size <= 0) {
+        fprintf(stderr, "Failed to encode image data: %s\n", filepath);
+        if (encoded_image_data) {
+            MemFree(encoded_image_data);
+        }
+        return NULL;
+    }
+
+    b64_output = encode_buffer_as_base64(encoded_image_data, (size_t)encoded_image_size);
+    MemFree(encoded_image_data);
+
+    return b64_output;
+}
+
+static char* encode_loaded_image_as_base64(const Image* loadedImage) {
+    const int maxDimension = 512;
+    Image workingImage;
+    unsigned char* encodedImageData;
+    int encodedImageSize = 0;
+    char* b64Output;
+
+    if (!loadedImage || !loadedImage->data) {
+        return NULL;
+    }
+
+    workingImage = ImageCopy(*loadedImage);
+    if (!workingImage.data) {
+        fprintf(stderr, "Failed to copy loaded image for base64 encoding\n");
+        return NULL;
+    }
+
+    if (workingImage.width != maxDimension || workingImage.height != maxDimension) {
+        ImageResize(&workingImage, maxDimension, maxDimension);
+    }
+
+    encodedImageData = ExportImageToMemory(workingImage, ".png", &encodedImageSize);
+    UnloadImage(workingImage);
+
+    if (!encodedImageData || encodedImageSize <= 0) {
+        fprintf(stderr, "Failed to encode loaded image data\n");
+        if (encodedImageData) {
+            MemFree(encodedImageData);
+        }
+        return NULL;
+    }
+
+    b64Output = encode_buffer_as_base64(encodedImageData, (size_t)encodedImageSize);
+    MemFree(encodedImageData);
+    return b64Output;
+}
+
+static const char* get_cached_resized_image_base64(const char* filepath) {
+    char* loadedBase64 = NULL;
+    const char* cachedBase64 = NULL;
+
+    if (!filepath || filepath[0] == '\0') {
+        return NULL;
+    }
+
+    pthread_mutex_lock(&visionImageCacheMutex);
+    for (size_t i = 0; i < visionImageCacheCount; ++i) {
+        if (strcmp(visionImageCache[i].filepath, filepath) == 0) {
+            cachedBase64 = visionImageCache[i].base64Png;
+            pthread_mutex_unlock(&visionImageCacheMutex);
+            return cachedBase64;
+        }
+    }
+    pthread_mutex_unlock(&visionImageCacheMutex);
+
+    loadedBase64 = read_image_as_base64(filepath);
+    if (!loadedBase64) {
+        return NULL;
+    }
+
+    pthread_mutex_lock(&visionImageCacheMutex);
+    for (size_t i = 0; i < visionImageCacheCount; ++i) {
+        if (strcmp(visionImageCache[i].filepath, filepath) == 0) {
+            cachedBase64 = visionImageCache[i].base64Png;
+            pthread_mutex_unlock(&visionImageCacheMutex);
+            free(loadedBase64);
+            return cachedBase64;
+        }
+    }
+
+    {
+        VisionImageCacheEntry* resizedCache = realloc(
+            visionImageCache,
+            (visionImageCacheCount + 1) * sizeof(VisionImageCacheEntry)
+        );
+        if (!resizedCache) {
+            pthread_mutex_unlock(&visionImageCacheMutex);
+            free(loadedBase64);
+            fprintf(stderr, "Failed to grow vision image cache\n");
+            return NULL;
+        }
+
+        visionImageCache = resizedCache;
+        visionImageCache[visionImageCacheCount].filepath = strdup(filepath);
+        if (!visionImageCache[visionImageCacheCount].filepath) {
+            pthread_mutex_unlock(&visionImageCacheMutex);
+            free(loadedBase64);
+            fprintf(stderr, "Failed to cache vision image path\n");
+            return NULL;
+        }
+
+        visionImageCache[visionImageCacheCount].base64Png = loadedBase64;
+        cachedBase64 = visionImageCache[visionImageCacheCount].base64Png;
+        visionImageCacheCount++;
+    }
+
+    pthread_mutex_unlock(&visionImageCacheMutex);
+    return cachedBase64;
+}
+
+void clear_llm_vision_image_cache(void) {
+    pthread_mutex_lock(&visionImageCacheMutex);
+    for (size_t i = 0; i < visionImageCacheCount; ++i) {
+        free(visionImageCache[i].filepath);
+        free(visionImageCache[i].base64Png);
+    }
+    free(visionImageCache);
+    visionImageCache = NULL;
+    visionImageCacheCount = 0;
+    pthread_mutex_unlock(&visionImageCacheMutex);
+}
+
+bool cache_llm_vision_image_from_loaded_image(const char* filepath, const Image* loadedImage) {
+    char* loadedBase64 = NULL;
+
+    if (!filepath || filepath[0] == '\0' || !loadedImage || !loadedImage->data) {
+        return false;
+    }
+
+    pthread_mutex_lock(&visionImageCacheMutex);
+    for (size_t i = 0; i < visionImageCacheCount; ++i) {
+        if (strcmp(visionImageCache[i].filepath, filepath) == 0) {
+            pthread_mutex_unlock(&visionImageCacheMutex);
+            return true;
+        }
+    }
+    pthread_mutex_unlock(&visionImageCacheMutex);
+
+    loadedBase64 = encode_loaded_image_as_base64(loadedImage);
+    if (!loadedBase64) {
+        return false;
+    }
+
+    pthread_mutex_lock(&visionImageCacheMutex);
+    for (size_t i = 0; i < visionImageCacheCount; ++i) {
+        if (strcmp(visionImageCache[i].filepath, filepath) == 0) {
+            pthread_mutex_unlock(&visionImageCacheMutex);
+            free(loadedBase64);
+            return true;
+        }
+    }
+
+    {
+        VisionImageCacheEntry* resizedCache = realloc(
+            visionImageCache,
+            (visionImageCacheCount + 1) * sizeof(VisionImageCacheEntry)
+        );
+        if (!resizedCache) {
+            pthread_mutex_unlock(&visionImageCacheMutex);
+            free(loadedBase64);
+            fprintf(stderr, "Failed to grow vision image cache\n");
+            return false;
+        }
+
+        visionImageCache = resizedCache;
+        visionImageCache[visionImageCacheCount].filepath = strdup(filepath);
+        if (!visionImageCache[visionImageCacheCount].filepath) {
+            pthread_mutex_unlock(&visionImageCacheMutex);
+            free(loadedBase64);
+            fprintf(stderr, "Failed to cache vision image path\n");
+            return false;
+        }
+
+        visionImageCache[visionImageCacheCount].base64Png = loadedBase64;
+        visionImageCacheCount++;
+    }
+
+    pthread_mutex_unlock(&visionImageCacheMutex);
+    return true;
 }
 
 static char* dump_json_payload(json_t* payload) {
@@ -515,7 +702,7 @@ char* getLLMResponseWithVision(
     }
 
     for (int i = 0; i < image_count; ++i) {
-        char* base64_image = read_image_as_base64(image_paths[i]);
+        const char* base64_image = get_cached_resized_image_base64(image_paths[i]);
         char* data_url = NULL;
         char character_label[32];
         int character_number = (image_labels && image_labels[i] > 0) ? image_labels[i] : (i + 1);
@@ -527,24 +714,20 @@ char* getLLMResponseWithVision(
 
         snprintf(character_label, sizeof(character_label), "Character %d:", character_number);
         if (append_text_content_item(user_content, character_label) < 0) {
-            free(base64_image);
             goto cleanup;
         }
 
         if (asprintf(&data_url, "data:image/png;base64,%s", base64_image) == -1) {
             fprintf(stderr, "Failed to construct image data URL\n");
-            free(base64_image);
             goto cleanup;
         }
 
         if (append_image_content_item(user_content, data_url) < 0) {
             free(data_url);
-            free(base64_image);
             goto cleanup;
         }
 
         free(data_url);
-        free(base64_image);
     }
 
     if (append_text_content_item(user_content, final_prompt) < 0) {
