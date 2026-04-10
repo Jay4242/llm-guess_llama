@@ -9,6 +9,7 @@ SOURCES = \
 	storage.c \
 	gameplay.c \
 	game_setup.c \
+	openrouter.c \
 	stable-diffusion.c
 OBJECTS = $(SOURCES:.c=.o)
 
