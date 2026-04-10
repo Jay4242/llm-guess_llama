@@ -96,22 +96,66 @@ static void freeEliminationList(char** eliminationList, int eliminationCount) {
     free(eliminationList);
 }
 
-static void drawCenteredPlayerTexture(Texture2D playerTexture, float centerX, float topY, float textureScale) {
+static void drawCenteredPlayerTexture(
+    Texture2D playerTexture,
+    float centerX,
+    float topY,
+    float textureScale,
+    float maxDisplayWidth,
+    float maxDisplayHeight
+) {
     if (playerTexture.id == 0) {
         return;
     }
 
-    const float imageWidthOnScreen =
-        (float)playerTexture.width * textureScale * getVirtualScaleX();
-    const float imageHeightOnScreen =
-        (float)playerTexture.height * textureScale * getVirtualScaleY();
-    const float squareSizeOnScreen =
-        (imageWidthOnScreen < imageHeightOnScreen) ?
-            imageWidthOnScreen :
-            imageHeightOnScreen;
-    const float destinationWidth = squareSizeOnScreen / getVirtualScaleX();
-    const float destinationHeight = squareSizeOnScreen / getVirtualScaleY();
-    const Rectangle destination = {
+    float virtualScaleX = getVirtualScaleX();
+    float virtualScaleY = getVirtualScaleY();
+    float sourceSize = (playerTexture.width < playerTexture.height) ?
+        (float)playerTexture.width :
+        (float)playerTexture.height;
+    float squareSizeOnScreen;
+    float maxWidthOnScreen;
+    float maxHeightOnScreen;
+    float destinationWidth;
+    float destinationHeight;
+    Rectangle source;
+    Rectangle destination;
+
+    if (virtualScaleX <= 0.0f) {
+        virtualScaleX = 1.0f;
+    }
+    if (virtualScaleY <= 0.0f) {
+        virtualScaleY = 1.0f;
+    }
+
+    squareSizeOnScreen = sourceSize * textureScale *
+        ((virtualScaleX < virtualScaleY) ? virtualScaleX : virtualScaleY);
+
+    if (maxDisplayWidth > 0.0f) {
+        maxWidthOnScreen = maxDisplayWidth * virtualScaleX;
+        if (squareSizeOnScreen > maxWidthOnScreen) {
+            squareSizeOnScreen = maxWidthOnScreen;
+        }
+    }
+
+    if (maxDisplayHeight > 0.0f) {
+        maxHeightOnScreen = maxDisplayHeight * virtualScaleY;
+        if (squareSizeOnScreen > maxHeightOnScreen) {
+            squareSizeOnScreen = maxHeightOnScreen;
+        }
+    }
+
+    destinationWidth = squareSizeOnScreen / virtualScaleX;
+    destinationHeight = squareSizeOnScreen / virtualScaleY;
+
+    source = (Rectangle){
+        ((float)playerTexture.width - sourceSize) * 0.5f,
+        ((float)playerTexture.height - sourceSize) * 0.5f,
+        sourceSize,
+        sourceSize
+    };
+
+    destination = (Rectangle){
         centerX - destinationWidth * 0.5f,
         topY,
         destinationWidth,
@@ -120,7 +164,7 @@ static void drawCenteredPlayerTexture(Texture2D playerTexture, float centerX, fl
 
     DrawTexturePro(
         playerTexture,
-        (Rectangle){0, 0, (float)playerTexture.width, (float)playerTexture.height},
+        source,
         destination,
         (Vector2){0.0f, 0.0f},
         0.0f,
@@ -128,21 +172,50 @@ static void drawCenteredPlayerTexture(Texture2D playerTexture, float centerX, fl
     );
 }
 
-static float getPlayerTextureSquareSize(Texture2D playerTexture, float textureScale) {
+static float getPlayerTextureDisplayHeight(
+    Texture2D playerTexture,
+    float textureScale,
+    float maxDisplayWidth,
+    float maxDisplayHeight
+) {
     if (playerTexture.id == 0) {
         return 0.0f;
     }
 
-    const float imageWidthOnScreen =
-        (float)playerTexture.width * textureScale * getVirtualScaleX();
-    const float imageHeightOnScreen =
-        (float)playerTexture.height * textureScale * getVirtualScaleY();
-    const float squareSizeOnScreen =
-        (imageWidthOnScreen < imageHeightOnScreen) ?
-            imageWidthOnScreen :
-            imageHeightOnScreen;
+    float virtualScaleX = getVirtualScaleX();
+    float virtualScaleY = getVirtualScaleY();
+    float sourceSize = (playerTexture.width < playerTexture.height) ?
+        (float)playerTexture.width :
+        (float)playerTexture.height;
+    float squareSizeOnScreen;
+    float maxWidthOnScreen;
+    float maxHeightOnScreen;
 
-    return squareSizeOnScreen / getVirtualScaleY();
+    if (virtualScaleX <= 0.0f) {
+        virtualScaleX = 1.0f;
+    }
+    if (virtualScaleY <= 0.0f) {
+        virtualScaleY = 1.0f;
+    }
+
+    squareSizeOnScreen = sourceSize * textureScale *
+        ((virtualScaleX < virtualScaleY) ? virtualScaleX : virtualScaleY);
+
+    if (maxDisplayWidth > 0.0f) {
+        maxWidthOnScreen = maxDisplayWidth * virtualScaleX;
+        if (squareSizeOnScreen > maxWidthOnScreen) {
+            squareSizeOnScreen = maxWidthOnScreen;
+        }
+    }
+
+    if (maxDisplayHeight > 0.0f) {
+        maxHeightOnScreen = maxDisplayHeight * virtualScaleY;
+        if (squareSizeOnScreen > maxHeightOnScreen) {
+            squareSizeOnScreen = maxHeightOnScreen;
+        }
+    }
+
+    return squareSizeOnScreen / virtualScaleY;
 }
 
 static char* normalizeYesNoAnswer(const char* answerText) {
@@ -980,6 +1053,7 @@ void llmGuessingRound(
     int singleCandidate = -1;
     char playerIdentityText[64];
     const float playerImageScale = 0.78f;
+    const float maxPlayerImageWidth = 512.0f;
 
     snprintf(
         playerIdentityText,
@@ -1056,10 +1130,25 @@ void llmGuessingRound(
                 }
             } else {
                 const int titleFontSize = 24;
+                const int waitingFontSize = 20;
                 const float titleY = 18.0f;
                 const float imageTopY = titleY + (float)titleFontSize + 12.0f;
+                const float waitingTextGap = 30.0f;
+                const float controlsReservedHeight = 114.0f;
+                float maxPlayerImageHeight =
+                    (float)SCREEN_HEIGHT - imageTopY - controlsReservedHeight;
+
+                if (maxPlayerImageHeight < 120.0f) {
+                    maxPlayerImageHeight = 120.0f;
+                }
+
                 const float imageBottomY =
-                    imageTopY + getPlayerTextureSquareSize(playerTexture, playerImageScale);
+                    imageTopY + getPlayerTextureDisplayHeight(
+                        playerTexture,
+                        playerImageScale,
+                        maxPlayerImageWidth,
+                        maxPlayerImageHeight
+                    );
                 beginVirtualFrame();
                 ClearBackground(RAYWHITE);
 
@@ -1070,13 +1159,20 @@ void llmGuessingRound(
                     titleFontSize,
                     BLACK
                 );
-                drawCenteredPlayerTexture(playerTexture, (float)SCREEN_WIDTH * 0.5f, imageTopY, playerImageScale);
+                drawCenteredPlayerTexture(
+                    playerTexture,
+                    (float)SCREEN_WIDTH * 0.5f,
+                    imageTopY,
+                    playerImageScale,
+                    maxPlayerImageWidth,
+                    maxPlayerImageHeight
+                );
 
                 DrawText(
                     "LLM is generating a question...",
-                    SCREEN_WIDTH / 2 - MeasureText("LLM is generating a question...", 20) / 2,
-                    (int)imageBottomY + 22,
-                    20,
+                    SCREEN_WIDTH / 2 - MeasureText("LLM is generating a question...", waitingFontSize) / 2,
+                    (int)imageBottomY + (int)waitingTextGap,
+                    waitingFontSize,
                     GRAY
                 );
 
@@ -1090,7 +1186,21 @@ void llmGuessingRound(
             const int questionFontSize = 20;
             const float titleY = 18.0f;
             const float imageTopY = titleY + (float)titleFontSize + 12.0f;
-            const float imageBottomY = imageTopY + getPlayerTextureSquareSize(playerTexture, playerImageScale);
+            const float eliminationControlsHeight = 114.0f;
+            float maxPlayerImageHeight =
+                (float)SCREEN_HEIGHT - imageTopY - eliminationControlsHeight;
+
+            if (maxPlayerImageHeight < 120.0f) {
+                maxPlayerImageHeight = 120.0f;
+            }
+
+            const float imageBottomY =
+                imageTopY + getPlayerTextureDisplayHeight(
+                    playerTexture,
+                    playerImageScale,
+                    maxPlayerImageWidth,
+                    maxPlayerImageHeight
+                );
             const int buttonWidth = 80;
             const int buttonHeight = 30;
             const int buttonGap = 20;
@@ -1119,7 +1229,14 @@ void llmGuessingRound(
                 titleFontSize,
                 BLACK
             );
-            drawCenteredPlayerTexture(playerTexture, (float)SCREEN_WIDTH * 0.5f, imageTopY, playerImageScale);
+            drawCenteredPlayerTexture(
+                playerTexture,
+                (float)SCREEN_WIDTH * 0.5f,
+                imageTopY,
+                playerImageScale,
+                maxPlayerImageWidth,
+                maxPlayerImageHeight
+            );
 
             pthread_mutex_lock(&mutex);
             DrawText(
