@@ -194,6 +194,22 @@ int generate_character_image(const char* prompt, int character_number, const cha
     }
     pthread_mutex_unlock(&mutex);
 
+    if (is_openrouter_server_url(server_url)) {
+        result = generate_character_image_openrouter(prompt, character_number, image_dir);
+        free(data);
+        if (result == 0) {
+            pthread_mutex_lock(&mutex);
+            {
+                int total = total_characters_to_generate > 0 ? total_characters_to_generate : NUM_CHARACTERS;
+                int completed_percent = ((current_image_index + 1) * 100) / total;
+                snprintf(current_percent, sizeof(current_percent), "%d%%", completed_percent);
+            }
+            pthread_mutex_unlock(&mutex);
+            printf("Successfully generated image for character %d\n", character_number);
+        }
+        return result;
+    }
+
     response = make_http_post(url, data);
     free(data);
     if (!response) {
