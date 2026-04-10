@@ -101,6 +101,8 @@ static bool ensureVirtualRenderTargetSize(void) {
 }
 
 const char* server_url = "localhost:1234";
+const char* serverModel = "black-forest-labs/flux.2-klein-4b";
+const char* serverApiKey = "";
 const char* llmServerAddress = "http://localhost:9090";
 const char* llmApiKey = "";
 const char* llmModel = "qwen3.5";
@@ -248,12 +250,37 @@ static void loadDotEnvFile(const char* filepath) {
 }
 
 void initRuntimeConfig(void) {
+    const char* imageServerUrlEnv;
+    const char* imageServerModelEnv;
+    const char* imageServerApiKeyEnv;
+
     loadDotEnvFile(".env.local");
     loadDotEnvFile(".env");
 
-    server_url = getEnvOrDefault("GUESS_LLAMA_SERVER_URL", "localhost:1234");
+    imageServerUrlEnv = getenv("GUESS_LLAMA_IMAGE_SERVER_URL");
+    if (imageServerUrlEnv && imageServerUrlEnv[0] != '\0') {
+        server_url = imageServerUrlEnv;
+    } else {
+        server_url = getEnvOrDefault("GUESS_LLAMA_SERVER_URL", "localhost:1234");
+    }
+
+    imageServerModelEnv = getenv("GUESS_LLAMA_IMAGE_SERVER_MODEL");
+    if (imageServerModelEnv && imageServerModelEnv[0] != '\0') {
+        serverModel = imageServerModelEnv;
+    } else {
+        serverModel = getEnvOrDefault("GUESS_LLAMA_SERVER_MODEL", "black-forest-labs/flux.2-klein-4b");
+    }
+
     llmServerAddress = getEnvOrDefault("GUESS_LLAMA_LLM_SERVER", "http://localhost:9090");
     llmApiKey = getEnvOrDefault("GUESS_LLAMA_LLM_API_KEY", "");
+
+    imageServerApiKeyEnv = getenv("GUESS_LLAMA_IMAGE_SERVER_API_KEY");
+    if (imageServerApiKeyEnv && imageServerApiKeyEnv[0] != '\0') {
+        serverApiKey = imageServerApiKeyEnv;
+    } else {
+        serverApiKey = getEnvOrDefault("GUESS_LLAMA_SERVER_API_KEY", llmApiKey);
+    }
+
     llmModel = getEnvOrDefault("GUESS_LLAMA_LLM_MODEL", "qwen3.5");
 }
 
@@ -356,6 +383,7 @@ float getVirtualScaleY(void) {
 bool loadPlayerCharacterTexture(void) {
     char playerImagePath[MAX_FILEPATH_BUFFER_SIZE];
     Image playerImage;
+    bool loadedFromBoardTexture = false;
 
     snprintf(
         playerImagePath,
@@ -365,9 +393,21 @@ bool loadPlayerCharacterTexture(void) {
         playerCharacter + 1
     );
 
-    playerImage = LoadImage(playerImagePath);
+    memset(&playerImage, 0, sizeof(playerImage));
+    if (playerCharacter >= 0 &&
+        playerCharacter < NUM_CHARACTERS &&
+        boardCharacterTextures[playerCharacter].id != 0) {
+        playerImage = LoadImageFromTexture(boardCharacterTextures[playerCharacter]);
+        loadedFromBoardTexture = true;
+    } else {
+        playerImage = LoadImage(playerImagePath);
+    }
     if (playerImage.data == NULL) {
-        fprintf(stderr, "Failed to load player character image: %s\n", playerImagePath);
+        fprintf(
+            stderr,
+            "Failed to load player character image: %s\n",
+            loadedFromBoardTexture ? "[from board texture]" : playerImagePath
+        );
         return false;
     }
 
@@ -376,6 +416,9 @@ bool loadPlayerCharacterTexture(void) {
     }
 
     playerCharacterTexture = LoadTextureFromImage(playerImage);
+    if (!cache_llm_vision_image_from_loaded_image(playerImagePath, &playerImage)) {
+        fprintf(stderr, "Warning: Failed to warm vision cache for %s\n", playerImagePath);
+    }
     UnloadImage(playerImage);
 
     printf("Player character image loaded: %s\n", playerImagePath);
@@ -410,6 +453,9 @@ bool loadBoardCharacterTextures(void) {
         }
 
         boardCharacterTextures[i] = LoadTextureFromImage(characterImage);
+        if (!cache_llm_vision_image_from_loaded_image(imagePath, &characterImage)) {
+            fprintf(stderr, "Warning: Failed to warm vision cache for %s\n", imagePath);
+        }
         UnloadImage(characterImage);
     }
 
@@ -495,4 +541,6 @@ void freeGameResources(void) {
     }
     player_question_in_progress = false;
     player_question_success = false;
+
+    clear_llm_vision_image_cache();
 }
