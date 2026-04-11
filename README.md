@@ -161,3 +161,5 @@ During the player's elimination phase:
 - Generated assets and game metadata are stored in `images/<formatted_theme>/`.
 - `game_data.json` is reused when you keep existing theme data.
 - The LLM currently reasons over generated PNGs saved as `character_<n>.png`.
+- **Important**: Run the program from its own directory. It creates an `images/` folder in the current working directory and stores all generated assets there.
+- **Warning**: If you choose to regenerate assets for an existing theme, the program deletes ALL files in that theme's image directory (e.g., `images/<theme>/`). Any non-game files placed there will be lost.
