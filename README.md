@@ -1,5 +1,7 @@
 # Guess Llama? Game
 
+https://github.com/user-attachments/assets/8d9dcce2-1e0b-47d8-979b-ced8fe747d44
+
 ## Description
 
 This project is a C version of "Guess Who?" built with Raylib, libcurl, Jansson, and pthreads. It uses an LLM to generate themes and character traits, then uses a `stable-diffusion.cpp` server to create the character art the LLM reasons over during play.
